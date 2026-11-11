@@ -28,6 +28,14 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 
 ## What is missing to be 100% playable
 
+### Repository (quick wins, 2026-11-11)
+
+- [x] The toolkit patch in this repository: `tools/setup_toolkit.sh` and `rebuild.py` looked for `ps3recomp-fork-770660a-with-upstream-prs.patch`, which only existed in the inFAMOUS 2 tree, so a clean checkout could not build. Now in `infamous1-lle/patches/`, made from the toolkit checkout the port builds against: the inFAMOUS 2 patch plus the `PS3_MEM_ALLOC_SIZE` fix. Checked: `setup_toolkit.sh` applies it to a clean clone of `770660a`.
+- [x] Screenshots of the port in `docs/screenshots/` and a gallery at the top of the README, as in the inFAMOUS 2 and Resistance repositories (headless frames from `out/start-run`).
+- [x] CI for the launcher (macOS, Windows, Linux) and the Python/shell tools (`.github/workflows/`), plus Dependabot for the action pins. Every step was run locally first: the tools' self-tests, the staging, `rebuild.py --check-json`, `npm run typecheck/build`, `cargo test --locked` (72 passed).
+- [x] The launcher's UI mock (`launcher/scripts/ui-mock.js`) showed inFAMOUS 2 names, paths and saves.
+- [x] `rebuild.py` did not ship `runtime_overrides/cellGame.c` (the HDD boot fix) with the port sources, so a rebuild would have lost it; the staging check caught it. Also `infamous1-lle/README.md`, which the rebuild ships, was missing.
+
 ### Blockers
 
 - [x] Boot past the memory window (the allocator ended 256 MB after its base; now `PS3_MEM_ALLOC_SIZE`, 768 MB in `run.sh`). Evidence: `out/boot/boot7.log`, zero `null-write`, 66 allocation calls in total, the whole flow to the Bink videos and "Game State Thread".
@@ -60,7 +68,8 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 
 ### Rebuild
 
-- [ ] An install/rebuild wizard in the app. The inherited one still holds the inFAMOUS 2 recipe, so it is disabled; today the build is the local CMake in `infamous1-lle`.
+- [ ] Port `infamous1-lle/tools/rebuild.py` to this game. It is still the inFAMOUS 2 recipe: `--code-end 0x742e18` (here `0x55EB44`), the `Wws_Job` policy module cut from the EBOOT at `0x8D5B00` (here it is passed at run time), the data and relocatable modules (none here), the extra SPU entry points and the expected EBOOT hashes of inFAMOUS 2 1.03 (here APP_VER 01.00, SHA-256 `5e22402a…`). The manual recipe is in [`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding).
+- [ ] An install/rebuild wizard in the app, on top of the ported `rebuild.py`. The inherited one is disabled; today the build is the local CMake in `infamous1-lle`.
 - [ ] Look for the relocatable job lifts of inFAMOUS 2 in this EBOOT in other formats: the scanner found zero blobs with the expected signature (that does not rule out other formats).
 - [ ] A `rebuild.py` run end to end from a clean checkout.
 

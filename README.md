@@ -10,7 +10,18 @@ graphics on Metal. It is not an emulator.
 **It boots, plays the studio logos and videos, reaches the 3D title screen,
 and gets through the opening explosion to Cole in the tutorial** ("Use the
 right stick to look up at the chopper"), at ~44 fps on Apple silicon in
-headless runs. It rebuilds the game from your own copy ([how](#building-from-source)).
+headless runs. It is built from your own copy ([how](#building-from-source)).
+
+| | |
+| --- | --- |
+| [<img src="docs/screenshots/01-boot-sucker-punch-logo.jpg" width="420" alt="Sucker Punch logo at boot">](docs/screenshots/01-boot-sucker-punch-logo.jpg)<br>Boot: the studio logo | [<img src="docs/screenshots/02-title-screen.jpg" width="420" alt="3D title screen, Press the Start Button">](docs/screenshots/02-title-screen.jpg)<br>3D title screen |
+| [<img src="docs/screenshots/03-intro-cutscene.jpg" width="420" alt="The blast in Empire City, in-engine cutscene">](docs/screenshots/03-intro-cutscene.jpg)<br>The blast (in-engine cutscene) | [<img src="docs/screenshots/04-cole-after-the-blast.jpg" width="420" alt="Cole on the ground after the blast">](docs/screenshots/04-cole-after-the-blast.jpg)<br>Cole after the blast |
+| [<img src="docs/screenshots/05-crater.jpg" width="420" alt="The crater and the burning city">](docs/screenshots/05-crater.jpg)<br>The crater | [<img src="docs/screenshots/06-tutorial.jpg" width="420" alt="Gameplay: the first tutorial, look up at the chopper">](docs/screenshots/06-tutorial.jpg)<br>Gameplay: the first tutorial |
+
+<sub>Frames from the port itself running on an Apple-silicon Mac (M4 Pro),
+built from the player's own copy, at the game's 1280×720, captured headless
+with `tools/capture.sh`. inFAMOUS © Sony Interactive Entertainment, developed
+by Sucker Punch Productions; shown only to document the port.</sub>
 
 > [!WARNING]
 > **Early alpha.** The game runs from boot to the prologue tutorial, only on
@@ -135,17 +146,28 @@ tools/setup_toolkit.sh                        # toolkit in ./ps3recomp-fork
 .venv/bin/pip install -r ps3recomp-fork/requirements.txt
 ```
 
+`setup_toolkit.sh` clones NoahBPeterson's fork at `770660a` and applies
+`infamous1-lle/patches/ps3recomp-fork-770660a-with-upstream-prs.patch` (the
+inFAMOUS 2 port's toolkit patch plus this port's memory-window fix).
+
 Then decrypt the EBOOT and firmware (RPCS3's `--decrypt`, or your own key file
 in scetool format with `infamous1-lle/tools/decrypt_self.py`; no keys ship with
-this repository), translate and compile:
+this repository), translate and compile. The commands are in
+[`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding); the compile
+step is:
 
 ```sh
-python3 infamous1-lle/tools/rebuild.py --dry-run     # lists the steps, checks prerequisites
-cd infamous1-lle && cmake -S . -B build -G Ninja && ninja -C build Infamous1Recomp
+cd infamous1-lle
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS3RECOMP_DIR="$PWD/../ps3recomp-fork"
+cmake --build build -j 8
 ```
 
-The recipe for the job modules is in `infamous1-lle/tools/` (`lift_spu_jobs.sh`,
-`extract_eboot_jobmods.py`, `lift_datamods.py`, `lift_relocmods.py`).
+`infamous1-lle/tools/rebuild.py` (the one-command rebuild the inFAMOUS 2 port
+has) is still that game's recipe: `--dry-run` checks the prerequisites, but a
+full run is not ported yet ([roadmap](ROADMAP.md#rebuild)).
+
+CI (`.github/workflows/`) builds the launcher for macOS, Windows and Linux and
+checks the Python and shell tools on every change; no game data is involved.
 
 ## Playing from the terminal
 
@@ -215,7 +237,8 @@ frame every 10 s, `PAD_SCRIPT="145:0x0008"` presses START at 145 s, and
 | [`infamous1-lle/`](infamous1-lle) | **Current port.** inFAMOUS 1 fork + firmware LLE: `main.cpp`, `stubs.cpp`, `run.sh`, runtime overrides, SPU/PPU tools. |
 | `infamous1/` | Local game files (`vfs/`), never published. |
 | [`launcher/`](launcher/README.md) | The desktop app (Tauri): play, settings, saves. |
-| `tools/` | `setup_toolkit.sh` clones the fork at the commit in use; job-module lifting scripts. |
+| `tools/` | `setup_toolkit.sh` clones the fork at the commit in use and applies the patch; job-module lifting scripts. |
+| `docs/screenshots/` | The gallery at the top of this page. |
 | [`NOTES.md`](NOTES.md) | Working notes and evidence, in Portuguese. |
 | [`PORT_FEATURES.md`](PORT_FEATURES.md) | What came from the inFAMOUS 2 port and what was checked. |
 

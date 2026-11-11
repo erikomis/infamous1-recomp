@@ -28,6 +28,14 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 
 ## O que falta para ser 100% jogável
 
+### Repositório (ganhos rápidos, 2026-11-11)
+
+- [x] O patch do toolkit neste repositório: `tools/setup_toolkit.sh` e `rebuild.py` procuravam `ps3recomp-fork-770660a-with-upstream-prs.patch`, que só existia na árvore do inFAMOUS 2, então um checkout limpo não compilava. Agora está em `infamous1-lle/patches/`, gerado a partir do checkout do toolkit contra o qual o port compila: o patch do inFAMOUS 2 mais a correção `PS3_MEM_ALLOC_SIZE`. Verificado: o `setup_toolkit.sh` aplica num clone limpo do `770660a`.
+- [x] Screenshots do port em `docs/screenshots/` e uma galeria no topo do README, como nos repositórios do inFAMOUS 2 e do Resistance (frames headless do `out/start-run`).
+- [x] CI do launcher (macOS, Windows, Linux) e das ferramentas Python/shell (`.github/workflows/`), mais o Dependabot para os pins das actions. Cada passo rodou localmente antes: os self-tests das ferramentas, o staging, `rebuild.py --check-json`, `npm run typecheck/build`, `cargo test --locked` (72 passaram).
+- [x] O mock da interface do launcher (`launcher/scripts/ui-mock.js`) mostrava nomes, caminhos e saves do inFAMOUS 2.
+- [x] O `rebuild.py` não levava o `runtime_overrides/cellGame.c` (a correção do boot por HDD) junto com os fontes do port, então um rebuild perderia a correção; a checagem do staging pegou isso. Faltava também o `infamous1-lle/README.md`, que o rebuild copia.
+
 ### Bloqueadores
 
 - [x] Boot além da janela de memória (o alocador terminava 256 MB depois da base; agora `PS3_MEM_ALLOC_SIZE`, 768 MB no `run.sh`). Evidência: `out/boot/boot7.log`, zero `null-write`, 66 chamadas de alocação no total, o fluxo inteiro até os vídeos Bink e a "Game State Thread".
@@ -60,7 +68,8 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 
 ### Rebuild
 
-- [ ] Um assistente de instalação/rebuild no app. O herdado ainda tem a receita do inFAMOUS 2, por isso está desativado; hoje o build é o CMake local em `infamous1-lle`.
+- [ ] Portar o `infamous1-lle/tools/rebuild.py` para este jogo. Ele ainda é a receita do inFAMOUS 2: `--code-end 0x742e18` (aqui `0x55EB44`), o policy module `Wws_Job` recortado do EBOOT em `0x8D5B00` (aqui ele é passado em tempo de execução), os módulos de dados e relocáveis (nenhum aqui), os entry points SPU extras e os hashes esperados do EBOOT do inFAMOUS 2 1.03 (aqui APP_VER 01.00, SHA-256 `5e22402a…`). A receita manual está em [`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding).
+- [ ] Um assistente de instalação/rebuild no app, sobre o `rebuild.py` portado. O herdado está desativado; hoje o build é o CMake local em `infamous1-lle`.
 - [ ] Procurar os relocatable job lifts do inFAMOUS 2 neste EBOOT em outros formatos: o scanner achou zero blobs com a assinatura esperada (isso não exclui outros formatos).
 - [ ] Um `rebuild.py` de ponta a ponta a partir de um checkout limpo.
 

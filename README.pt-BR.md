@@ -9,8 +9,20 @@ Metal. Não é um emulador.
 
 **Ele dá boot, mostra os logos e vídeos, chega à tela inicial 3D e passa da
 explosão de abertura até o Cole no tutorial** ("Use the right stick to look up
-at the chopper"), a ~44 fps em Apple silicon em execuções headless. Ele
-recompila o jogo a partir da sua própria cópia ([como](#compilando-a-partir-do-código)).
+at the chopper"), a ~44 fps em Apple silicon em execuções headless. Ele é
+compilado a partir da sua própria cópia ([como](#compilando-a-partir-do-código)).
+
+| | |
+| --- | --- |
+| [<img src="docs/screenshots/01-boot-sucker-punch-logo.jpg" width="420" alt="Logo da Sucker Punch no boot">](docs/screenshots/01-boot-sucker-punch-logo.jpg)<br>Boot: o logo do estúdio | [<img src="docs/screenshots/02-title-screen.jpg" width="420" alt="Tela inicial 3D, Press the Start Button">](docs/screenshots/02-title-screen.jpg)<br>Tela inicial 3D |
+| [<img src="docs/screenshots/03-intro-cutscene.jpg" width="420" alt="A explosão em Empire City, cutscene no motor do jogo">](docs/screenshots/03-intro-cutscene.jpg)<br>A explosão (cutscene no motor do jogo) | [<img src="docs/screenshots/04-cole-after-the-blast.jpg" width="420" alt="Cole no chão depois da explosão">](docs/screenshots/04-cole-after-the-blast.jpg)<br>Cole depois da explosão |
+| [<img src="docs/screenshots/05-crater.jpg" width="420" alt="A cratera e a cidade em chamas">](docs/screenshots/05-crater.jpg)<br>A cratera | [<img src="docs/screenshots/06-tutorial.jpg" width="420" alt="Gameplay: o primeiro tutorial, olhar para o helicóptero">](docs/screenshots/06-tutorial.jpg)<br>Gameplay: o primeiro tutorial |
+
+<sub>Frames do próprio port rodando num Mac com Apple silicon (M4 Pro),
+compilado a partir da cópia do jogador, na resolução do jogo (1280×720),
+capturados headless com `tools/capture.sh`. inFAMOUS © Sony Interactive
+Entertainment, desenvolvido pela Sucker Punch Productions; mostrado só para
+documentar o port.</sub>
 
 > [!WARNING]
 > **Alpha inicial.** O jogo roda do boot até o tutorial do prólogo, só em macOS
@@ -137,17 +149,30 @@ tools/setup_toolkit.sh                        # toolkit em ./ps3recomp-fork
 .venv/bin/pip install -r ps3recomp-fork/requirements.txt
 ```
 
+O `setup_toolkit.sh` clona o fork do NoahBPeterson no `770660a` e aplica o
+`infamous1-lle/patches/ps3recomp-fork-770660a-with-upstream-prs.patch` (o patch
+do toolkit do port do inFAMOUS 2 mais a correção da janela de memória deste
+port).
+
 Depois decifre o EBOOT e o firmware (o `--decrypt` do RPCS3, ou seu próprio
 arquivo de chaves no formato scetool com `infamous1-lle/tools/decrypt_self.py`;
-nenhuma chave vem neste repositório), traduza e compile:
+nenhuma chave vem neste repositório), traduza e compile. Os comandos estão em
+[`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding); a compilação é:
 
 ```sh
-python3 infamous1-lle/tools/rebuild.py --dry-run     # lista os passos e confere os pré-requisitos
-cd infamous1-lle && cmake -S . -B build -G Ninja && ninja -C build Infamous1Recomp
+cd infamous1-lle
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS3RECOMP_DIR="$PWD/../ps3recomp-fork"
+cmake --build build -j 8
 ```
 
-A receita dos módulos de job está em `infamous1-lle/tools/` (`lift_spu_jobs.sh`,
-`extract_eboot_jobmods.py`, `lift_datamods.py`, `lift_relocmods.py`).
+O `infamous1-lle/tools/rebuild.py` (o rebuild num comando só que o port do
+inFAMOUS 2 tem) ainda é a receita daquele jogo: o `--dry-run` confere os
+pré-requisitos, mas a execução completa ainda não foi portada
+([roadmap](ROADMAP.pt-BR.md#rebuild)).
+
+O CI (`.github/workflows/`) compila o launcher para macOS, Windows e Linux e
+confere as ferramentas Python e shell a cada mudança; nenhum dado do jogo é
+usado.
 
 ## Jogando pelo terminal
 
@@ -218,7 +243,8 @@ só. `tools/profile_run.sh` informa o fps por período e o código mais quente.
 | [`infamous1-lle/`](infamous1-lle) | **Port atual.** Fork do inFAMOUS 1 + LLE do firmware: `main.cpp`, `stubs.cpp`, `run.sh`, overrides de runtime, ferramentas SPU/PPU. |
 | `infamous1/` | Arquivos locais do jogo (`vfs/`), nunca publicados. |
 | [`launcher/`](launcher/README.md) | O app de desktop (Tauri): jogar, ajustes, saves. |
-| `tools/` | `setup_toolkit.sh` clona o fork no commit em uso; scripts de lift dos módulos de job. |
+| `tools/` | `setup_toolkit.sh` clona o fork no commit em uso e aplica o patch; scripts de lift dos módulos de job. |
+| `docs/screenshots/` | A galeria no topo desta página. |
 | [`NOTES.md`](NOTES.md) | Notas de trabalho e evidências. |
 | [`PORT_FEATURES.md`](PORT_FEATURES.md) | O que veio do port do inFAMOUS 2 e o que foi verificado. |
 
