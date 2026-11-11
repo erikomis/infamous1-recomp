@@ -20,7 +20,7 @@ managed=""; [ "$2" = "--managed" ] && managed=1
 FORK_URL=https://github.com/NoahBPeterson/ps3recomp.git
 FORK_BRANCH=infamous/rebase-v0.13.0
 FORK_COMMIT=770660a
-PATCH="$here/infamous2-lle/patches/ps3recomp-fork-770660a-with-upstream-prs.patch"
+PATCH="$here/infamous1-lle/patches/ps3recomp-fork-770660a-with-upstream-prs.patch"
 
 if [ ! -d "$dest/.git" ]; then
     git clone --branch "$FORK_BRANCH" "$FORK_URL" "$dest"
