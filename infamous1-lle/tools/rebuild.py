@@ -80,10 +80,12 @@ SETUP_TOOLKIT = os.path.join(REPO, 'tools', 'setup_toolkit.sh')
 PATCH = os.path.join(PORT_SRC, 'patches', 'ps3recomp-fork-770660a-with-upstream-prs.patch')
 
 TITLE_ID = 'NPUA80480'
-TESTED_APP_VER = '01.03'
-# sha256 of the decrypted EBOOT.elf (NPUA80480, APP_VER 01.03) the port is
+TESTED_APP_VER = '01.00'
+# sha256 of the decrypted EBOOT.elf (NPUA80480, APP_VER 01.00) the port is
 # built and tested against. A hash, not data: a different one only warns.
-TESTED_EBOOT_ELF_SHA256 = '3bfe08df4e2ed1201a83be3d38f13a66e900153dd4071f25a35c3c95a1717298'
+TESTED_EBOOT_ELF_SHA256 = '5e22402aa3ffe695106abc1a9956fa3ea78e4977c32d80b37b6db4c3ba7110c7'
+# End of the PPU code: the last import stub (0x55EB24) plus its 0x20 stride.
+PPU_CODE_END = '0x55EB44'
 FIRMWARE = ('liblv2', 'libsysmodule', 'libsre')
 # sha256 of the decrypted firmware modules (PS3 firmware 4.93) the port is
 # tested with. Hashes, not data: a different one only warns.
@@ -120,12 +122,17 @@ def game_executable(port):
         return app
     return os.path.join(build, 'Infamous1Recomp' + ('.exe' if os.name == 'nt' else ''))
 
-# Extra lifted entry points beyond the README recipe, found at run time and
+# The Wws_Job policy module: the title hands this blob to SPURS through
+# CellSpursWorkloadAttribute.pm, and the kernel GETs it into LS 0xA00
+# (stubs.cpp registers its code region as image 9).
+WWSJOB_PM_EA = 0x69E400
+WWSJOB_PM_SIZE = 11648
+# Extra lifted entry points beyond the plain lift, found at run time and
 # present in the build the port is tested with (an interrupted SPU job that
 # resumes at an address with no lifted entry runs on the interpreter there).
-SPU_IMAGE_EXTRA = ('0x9C84', '0x9DB8')                       # spu_0000_at_007FA100
-JOBMOD_EXTRA = (('jobmod_ab654d30fd90_efe70', ('0x15280', '0x155EC')),
-                ('jobmod_cbb4b5c85d75_e59f8', ('0x6C44', '0x6C64')))
+# The audio image's call-return PCs (spu_0003_at_006A4E80) are added by
+# tools/relift_spu_returns.py.
+JOBMOD_EXTRA = (('jobmod_542edebc6499_e80', ('0x18BB0',)),)
 
 GB = 1024 ** 3
 WORK_BYTES = int(1.5 * GB)      # toolkit, venv, lifts, objects, executable
@@ -217,6 +224,26 @@ def read_sfo(path):
         else:
             out[key] = val.rstrip(b'\0').decode('utf-8', 'replace')
     return out
+
+
+def elf_read_va(path, va, size):
+    """size bytes at guest address va of a big-endian ELF64 (the decrypted
+    EBOOT), found through its PT_LOAD program headers."""
+    with open(path, 'rb') as f:
+        hdr = f.read(64)
+        if hdr[:4] != b'\x7fELF' or hdr[4] != 2 or hdr[5] != 2:
+            raise ValueError('%s is not a big-endian ELF64' % path)
+        phoff = struct.unpack_from('>Q', hdr, 0x20)[0]
+        phentsize, phnum = struct.unpack_from('>HH', hdr, 0x36)
+        f.seek(phoff)
+        phdrs = f.read(phentsize * phnum)
+        for i in range(phnum):
+            p_type, _fl, off, vaddr, _pa, filesz, _msz, _al = struct.unpack_from(
+                '>IIQQQQQQ', phdrs, i * phentsize)
+            if p_type == 1 and vaddr <= va and va + size <= vaddr + filesz:
+                f.seek(off + va - vaddr)
+                return f.read(size)
+    raise ValueError('%#x+%d is not in a loaded segment of %s' % (va, size, path))
 
 
 def npd_content_id(path):
@@ -824,8 +851,10 @@ class Rebuild:
         elf = h(self.elf)
         fw = [h(os.path.join(self.fw_dir, m + '.prx')) for m in FIRMWARE]
         k['firmware'] = sha256_text('firmware', k['toolkit'], k['venv'], *fw)
-        k['ppu'] = sha256_text('ppu', k['toolkit'], k['venv'], elf)
-        k['spu'] = sha256_text('spu', k['toolkit'], k['venv'], elf)
+        k['ppu'] = sha256_text('ppu', k['toolkit'], k['venv'], elf, PPU_CODE_END)
+        # the spu step runs a port tool too (relift_spu_returns.py)
+        k['spu'] = sha256_text('spu', k['toolkit'], k['venv'], elf, k['port'],
+                               '%#x:%d' % (WWSJOB_PM_EA, WWSJOB_PM_SIZE))
         k['jobs'] = sha256_text('jobs', k['spu'], k['port'])
         k['dlc'] = sha256_text('dlc', k['game'], rap, bool(os.environ.get('PS3_RAP_KEY')))
         k['compile'] = sha256_text('compile', k['toolkit'], k['port'], k['firmware'], k['ppu'],
@@ -1044,8 +1073,8 @@ class Rebuild:
             if f.read(4) != b'\x7fELF':
                 raise StepError('EBOOT.elf is not an ELF: decryption failed')
         if sha256_file(self.elf) != TESTED_EBOOT_ELF_SHA256:
-            emit('WARN', 'decrypt', 'EBOOT.elf differs from the tested 01.03 executable: '
-                 'the lift may not match (expect problems)')
+            emit('WARN', 'decrypt', 'EBOOT.elf differs from the tested %s executable: '
+                 'the lift may not match (expect problems)' % TESTED_APP_VER)
         for m in FIRMWARE:
             emit('PROGRESS', 'decrypt', self.idx('decrypt'), m + '.sprx')
             s = os.path.join(self.fw_dir, m + '.sprx')
@@ -1108,7 +1137,7 @@ class Rebuild:
         emit('PROGRESS', 'ppu', self.idx('ppu'), 'translating (a few minutes)')
         self.run('ppu', [self.py, self.T('ppu_lifter.py'), self.elf,
                          '--functions', 'out/EBOOT.functions.json', '--hle-stubs', 'out/EBOOT.imports.json',
-                         '--code-end', '0x742e18', '--max-chunk-lines', '150000',
+                         '--code-end', PPU_CODE_END, '--max-chunk-lines', '150000',
                          '--jobs', str(self.jobs), '--output', 'recompiled/'], cwd=self.port)
 
     def step_spu(self):
@@ -1116,23 +1145,28 @@ class Rebuild:
         os.makedirs(os.path.join(self.port, 'out'), exist_ok=True)
         emit('PROGRESS', 'spu', self.idx('spu'), 'SPU images')
         self.run('spu', [self.py, self.T('extract_spu_images.py'), self.elf, '-o', 'spu/images'], cwd=self.port)
-        # the Wws_Job policy module: a raw blob the title hands to
-        # cellSpursAddWorkload (guest 0x8E5B00, 11904 bytes, file offset 0x8D5B00)
-        with open(self.elf, 'rb') as f:
-            f.seek(0x8D5B00)
-            blob = f.read(11904)
+        # the Wws_Job policy module: a raw blob the title hands to SPURS
+        # through CellSpursWorkloadAttribute.pm, cut out of the EBOOT
+        try:
+            blob = elf_read_va(self.elf, WWSJOB_PM_EA, WWSJOB_PM_SIZE)
+        except ValueError as e:
+            raise StepError(str(e))
         pm = os.path.join(self.port, 'out', 'wwsjob_pm.bin')
         with open(pm, 'wb') as f:
             f.write(blob)
+        pm_name = 'wwsjob_pm_at_%08X' % WWSJOB_PM_EA
         self.run('spu', [self.py, self.T('wrap_spu_elf.py'), 'out/wwsjob_pm.bin', '--base', '0xA00',
-                         '--entry', '0xA00', '--out', 'spu/images/wwsjob_pm_at_008E5B00.elf'], cwd=self.port)
+                         '--entry', '0xA00', '--out', 'spu/images/%s.elf' % pm_name], cwd=self.port)
         emit('PROGRESS', 'spu', self.idx('spu'), 'translating the SPU images')
         self.run('spu', [self.py, self.T('build_spu_workloads.py'), '--images', 'spu/images', '--lifted', 'spu',
                          '--out', 'spu/spu_workloads.c', '--register-fn', 'infamous1_spu_register_all',
-                         '--constructor', '--title', 'infamous1', '--eboot', self.elf,
-                         '--extra-funcs', 'wwsjob_pm_at_008E5B00=0xA2C',
-                         '--extra-funcs', 'spu_0000_at_007FA100=' + ','.join(SPU_IMAGE_EXTRA)],
+                         '--constructor', '--title', 'infamous1', '--eboot', self.elf],
                  cwd=self.port)
+        # the audio image resumes at its call-return PCs after an interrupt:
+        # relift it with every spu_link() target as an entry
+        emit('PROGRESS', 'spu', self.idx('spu'), 'audio image call returns')
+        self.run('spu', [self.py, os.path.join(self.port, 'tools', 'relift_spu_returns.py'),
+                         '--toolkit', self.toolkit], cwd=self.port)
 
     def step_jobs(self):
         spu = os.path.join(self.port, 'spu')
@@ -1153,12 +1187,8 @@ class Rebuild:
         for mod, extra in JOBMOD_EXTRA:
             self.run('jobs', [self.py, os.path.join(tools, 'relift_jobmod.py'), mod, '--extra', ','.join(extra),
                               '--jobmods', 'spu/jobmods', '--out', 'spu'], cwd=self.port)
-        emit('PROGRESS', 'jobs', self.idx('jobs'), 'data modules (DA7ABA5E)')
-        self.run('jobs', [self.py, os.path.join(tools, 'lift_datamods.py'), self.elf,
-                          '--out', 'spu', '--extra', '0x6C44,0x6C64'], cwd=self.port)
-        emit('PROGRESS', 'jobs', self.idx('jobs'), 'relocatable jobs')
-        self.run('jobs', [self.py, os.path.join(tools, 'lift_relocmods.py'), self.elf, '--out', 'spu'],
-                 cwd=self.port)
+        # No DA7ABA5E data modules in this EBOOT, and the relocatable-job
+        # scanner finds none: lift_datamods.py / lift_relocmods.py do not apply.
 
     def step_dlc(self):
         if not os.environ.get('PS3_RAP_KEY'):
@@ -1247,7 +1277,7 @@ class Rebuild:
         # "run", and is skipped at its turn if its inputs came out unchanged.
         upstream = {'venv': ['toolkit'], 'pup': ['venv'], 'decrypt': ['game', 'pup'],
                     'firmware': ['toolkit', 'venv', 'decrypt'], 'ppu': ['toolkit', 'venv', 'decrypt'],
-                    'spu': ['toolkit', 'venv', 'decrypt'], 'jobs': ['spu', 'port'], 'dlc': ['game'],
+                    'spu': ['toolkit', 'venv', 'decrypt', 'port'], 'jobs': ['spu', 'port'], 'dlc': ['game'],
                     'compile': ['toolkit', 'port', 'firmware', 'ppu', 'spu', 'jobs']}
         planned = {}
         for i, (sid, title) in enumerate(self.steps):

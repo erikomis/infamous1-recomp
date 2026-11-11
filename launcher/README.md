@@ -22,10 +22,13 @@ remoção de passes por hashes do segundo jogo e correção de câmera/HUD ultra
 Esses recursos exigem mapear e validar o código do primeiro jogo. O renderizador
 continua usando os trabalhos SPU originais para iluminação e SSAO.
 
-Atualização automática e instalação/rebuild pelo assistente estão desativados:
-o assistente herdado ainda contém a receita de lifting do segundo jogo. O
-launcher executa o build existente; não substitui o EBOOT, firmware ou código
-recompilado. Para compilar o jogo, use o CMake configurado em `infamous1-lle`.
+A instalação/rebuild pelo assistente roda o `infamous1-lle/tools/rebuild.py`,
+já portado para este jogo (2026-11-11: numa pasta limpa ele reproduziu o build
+testado byte a byte e o binário bootou até o tutorial). A tela em si ainda não
+foi testada clicando. O app procura o script em `INFAMOUS1_REPO`, ao lado do
+checkout (`../infamous1-lle/tools/rebuild.py`) ou nos recursos do bundle
+(`port/`, montados por `scripts/stage_port.py`). A atualização automática
+continua desativada.
 
 ## Desenvolvimento
 

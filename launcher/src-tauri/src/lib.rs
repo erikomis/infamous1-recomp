@@ -610,9 +610,16 @@ fn kill_tree(pid: u32) {
 /// rebuild.py: next to the sources in a development checkout (the launcher
 /// lives in <repo>/launcher), or in the app's bundled resources (port/, staged by
 /// launcher/scripts/stage_port.py).
-fn rebuild_script(_app: &AppHandle) -> Option<PathBuf> {
-    // The inherited installer still contains inFAMOUS 2-specific lift recipes.
-    None
+fn rebuild_script(app: &AppHandle) -> Option<PathBuf> {
+    let mut cands = Vec::new();
+    if let Some(r) = std::env::var_os("INFAMOUS1_REPO") {
+        cands.push(PathBuf::from(r).join("infamous1-lle/tools/rebuild.py"));
+    }
+    cands.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../infamous1-lle/tools/rebuild.py"));
+    if let Ok(res) = app.path().resource_dir() {
+        cands.push(res.join("port/infamous1-lle/tools/rebuild.py"));
+    }
+    cands.into_iter().find(|p| p.is_file()).map(|p| p.canonicalize().unwrap_or(p))
 }
 
 fn parse_env_lines(text: &str) -> Vec<(String, String)> {

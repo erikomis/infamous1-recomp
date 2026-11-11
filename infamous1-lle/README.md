@@ -60,12 +60,27 @@ In the port:
 
 ## Rebuilding
 
-`tools/rebuild.py` is still the inFAMOUS 2 recipe (its `--code-end`, policy
-module address, data and relocatable modules and EBOOT hashes are that game's),
-so only `--dry-run`, which checks the requirements, is meaningful here. Porting
-it is on the [roadmap](../ROADMAP.md#rebuild). By hand, from the notes in
-[`../NOTES.md`](../NOTES.md), with `T=../ps3recomp-fork/tools` and the
-toolkit's venv as `P`:
+`tools/rebuild.py` runs every step below in one go, from your RPCS3 install
+(or PKGs) and your `.rap` into a separate folder that mirrors this repository
+(`--out`, default `~/Library/Application Support/infamous1-recomp/install`),
+and only redoes what changed on a rerun. `--dry-run` checks the requirements
+and prints the plan; its output lines are what the launcher (`../launcher/`)
+reads. Checked on 2026-11-11 from a clean install: `lle/`, `lle_spu/`,
+`recompiled/` and `spu/` came out byte for byte the same as the tested build,
+and the binary boots to the tutorial.
+
+```sh
+python3 tools/rebuild.py --dry-run --game "$HOME/Library/Application Support/rpcs3/dev_hdd0/game/NPUA80480" \
+    --rap "$HOME/Library/Application Support/rpcs3/dev_hdd0/home/00000001/exdata/<content id>.rap"
+```
+
+Decryption goes through `rpcs3 --decrypt` by default, or `tools/decrypt_self.py`
+with your own key file (`--keys FILE` or `PS3_KEYS`); `--firmware` takes a
+`dev_flash` folder or Sony's `PS3UPDAT.PUP`. The decrypted EBOOT is checked
+against the tested `APP_VER 01.00` build (SHA-256 `5e22402a…`) and the firmware
+modules against 4.93; a difference only warns.
+
+By hand, with `T=../ps3recomp-fork/tools` and the toolkit's venv as `P`:
 
 ```sh
 # EBOOT: rpcs3 --decrypt (or tools/decrypt_self.py with your own keys) into game/EBOOT.elf
@@ -77,12 +92,18 @@ $P $T/ppu_lifter.py game/EBOOT.elf --functions out/EBOOT.functions.json \
     --hle-stubs out/EBOOT.imports.json --code-end 0x55EB44 \
     --max-chunk-lines 150000 --output recompiled/
 $P $T/extract_spu_images.py game/EBOOT.elf -o spu/images          # 8 SPU ELFs
+# the Wws_Job policy module: 11648 bytes at guest 0x69E400 (file offset 0x68E400)
+dd if=game/EBOOT.elf of=out/wwsjob_pm.bin bs=1 skip=$((0x68E400)) count=11648
+$P $T/wrap_spu_elf.py out/wwsjob_pm.bin --base 0xA00 --entry 0xA00 \
+    --out spu/images/wwsjob_pm_at_0069E400.elf
 $P $T/build_spu_workloads.py --images spu/images --lifted spu --out spu/spu_workloads.c \
     --register-fn infamous1_spu_register_all --constructor --title infamous1 \
     --eboot game/EBOOT.elf
+$P tools/relift_spu_returns.py --toolkit ../ps3recomp-fork   # audio image call returns
 $P tools/extract_eboot_jobmods.py game/EBOOT.elf --out spu/jobmods  # 21 job modules
 $P $T/lift_jobmods.py --jobmods spu/jobmods --out spu \
     --register spu/jobmods_register.c --symbol-prefix infamous1
+$P tools/relift_jobmod.py jobmod_542edebc6499_e80 --extra 0x18BB0
 
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DPS3RECOMP_DIR="$PWD/../ps3recomp-fork" -DPython3_EXECUTABLE="$P"
@@ -92,7 +113,11 @@ cmake --build build -j 8
 This EBOOT has no `DA7ABA5E` data modules, and the scanner found no
 relocatable job blobs, so `lift_datamods.py` and `lift_relocmods.py` do not
 apply. The `Wws_Job` policy module is passed at run time
-(`CellSpursWorkloadAttribute.pm`); there is no constant for it in the EBOOT.
+(`CellSpursWorkloadAttribute.pm`): the SPURS kernel GETs guest `0x69E400`
+(11,648 bytes, in the EBOOT's first segment) into LS `0xA00`. It is cut out,
+wrapped with `wrap_spu_elf.py` as `spu/images/wwsjob_pm_at_0069E400.elf`
+before `build_spu_workloads.py`, and `stubs.cpp` registers its code region
+as image 9.
 
 ## Running
 
