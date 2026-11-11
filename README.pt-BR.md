@@ -56,7 +56,8 @@ Veja [CREDITS.pt-BR.md](CREDITS.pt-BR.md).
 | Menu no jogo (F1 / Cmd+, / L3+R3) | 🧪 runtime compartilhado, ainda não verificado neste jogo |
 | Saves e troféus, gerenciador de saves no app | ✅ saves locais `BCUS98119_INFAMOUS_*` reconhecidos, saves do inFAMOUS 2 rejeitados |
 | O app: jogar, ajustes, controles, saves, logs | ✅ bundle macOS gerado, 72 testes passam, a janela inicia o jogo |
-| O app: assistente de instalação / rebuild | ⏳ desativado, ainda tem a receita do inFAMOUS 2 |
+| Rebuild a partir da sua cópia num comando (`rebuild.py`) | ✅ verificado a partir de uma instalação limpa: lifts idênticos ao build testado, boota até o tutorial |
+| O app: assistente de instalação / rebuild | 🧪 religado, sobre o `rebuild.py` portado; ainda não testado clicando no app |
 | O app se atualiza sozinho | ⏳ desativado nesta distribuição |
 | Iluminação e SSAO na GPU (o ganho de velocidade do inFAMOUS 2) | ⏳ exige trabalho próprio deste jogo, veja o roadmap |
 | Ultrawide com câmera e HUD corrigidos | ⏳ pendente, opção oculta |
@@ -73,7 +74,8 @@ Ainda não há release. Você precisa de um Mac com Apple silicon e da sua
 própria cópia do inFAMOUS (a versão PSN `NPUA80480`, por exemplo instalada no
 [RPCS3](https://rpcs3.net) com a licença `.rap`).
 
-1. Compile o jogo a partir da sua cópia, veja [Compilando a partir do código](#compilando-a-partir-do-código).
+1. Compile o jogo a partir da sua cópia com um comando, veja
+   [Compilando a partir do código](#compilando-a-partir-do-código).
 2. Abra **Jogar inFAMOUS.command** para jogar direto, ou
    **Launcher inFAMOUS.command** para o app (gráficos, controles, áudio, mods
    e saves) e use o botão Jogar.
@@ -95,10 +97,11 @@ da do segundo jogo. Em português e inglês.
 - **Pacotes de textura** e gerenciador do cache de shaders.
 - **Atalho do Steam** (opcional, só quando pedido na interface).
 
-Ainda não habilitados neste jogo: iluminação e SSAO na GPU, remoção de passes
-de shader do inFAMOUS 2 por hash, correção de câmera/HUD ultrawide, o
-assistente de instalação/rebuild e a atualização automática. Veja
-[launcher/README.md](launcher/README.md).
+A tela de **instalação/rebuild** roda o `infamous1-lle/tools/rebuild.py`
+(verificado pela linha de comando; a tela em si ainda não foi testada
+clicando). Ainda não habilitados neste jogo: iluminação e SSAO na GPU, remoção
+de passes de shader do inFAMOUS 2 por hash, correção de câmera/HUD ultrawide e
+a atualização automática. Veja [launcher/README.md](launcher/README.md).
 
 ## Problemas conhecidos
 
@@ -123,7 +126,7 @@ O que está sendo feito agora (detalhes em [ROADMAP.pt-BR.md](ROADMAP.pt-BR.md))
   câmera, escalada, combate, IA, checkpoints, texturas): os de imagem e
   velocidade saem das alavancas do runtime, os de lógica exigem patches no
   código traduzido.
-- **Um assistente de rebuild e um release** para o app.
+- **Um release** do app, e testar a tela de instalação clicando nela.
 - **Windows e Linux:** planejado.
 
 ## Compilando a partir do código
@@ -154,21 +157,26 @@ O `setup_toolkit.sh` clona o fork do NoahBPeterson no `770660a` e aplica o
 do toolkit do port do inFAMOUS 2 mais a correção da janela de memória deste
 port).
 
-Depois decifre o EBOOT e o firmware (o `--decrypt` do RPCS3, ou seu próprio
-arquivo de chaves no formato scetool com `infamous1-lle/tools/decrypt_self.py`;
-nenhuma chave vem neste repositório), traduza e compile. Os comandos estão em
-[`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding); a compilação é:
+Depois um comando faz o resto (decifrar, traduzir, compilar), a partir da sua
+cópia e da licença dela:
 
 ```sh
-cd infamous1-lle
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS3RECOMP_DIR="$PWD/../ps3recomp-fork"
-cmake --build build -j 8
+python3 infamous1-lle/tools/rebuild.py --game "<RPCS3>/dev_hdd0/game/NPUA80480" --rap <UP9000-NPUA80480...rap>
 ```
 
-O `infamous1-lle/tools/rebuild.py` (o rebuild num comando só que o port do
-inFAMOUS 2 tem) ainda é a receita daquele jogo: o `--dry-run` confere os
-pré-requisitos, mas a execução completa ainda não foi portada
-([roadmap](ROADMAP.pt-BR.md#rebuild)).
+O `--dry-run` lista os passos e confere cada pré-requisito antes. Por padrão o
+EBOOT e o firmware são decifrados com o RPCS3; sem o RPCS3, passe seu próprio
+arquivo de chaves (formato scetool) com `--keys ARQUIVO`, e o firmware como o
+`PS3UPDAT.PUP` da Sony com `--firmware PS3UPDAT.PUP`. Nenhuma chave vem neste
+repositório. A saída vai para `--out` (padrão
+`~/Library/Application Support/infamous1-recomp/install`); `--toolkit PASTA`
+usa um checkout já com o patch. A receita manual está em
+[`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding).
+
+Num M4 Pro, a partir de uma instalação limpa (2026-11-11), traduzir levou uns
+40 s e compilar uns 2 minutos. O resultado foi comparado com o build testado:
+os lifts de firmware, PPU e SPU saíram idênticos byte a byte, e o binário
+boota até o tutorial.
 
 O CI (`.github/workflows/`) compila o launcher para macOS, Windows e Linux e
 confere as ferramentas Python e shell a cada mudança; nenhum dado do jogo é

@@ -25,7 +25,7 @@ escalada etc.) são planejadas em [ROADMAP.md](ROADMAP.md).
 | Remoção de passes de oclusão do 2 | **Não aplicável por cópia direta** | Hashes de shaders do 2 removidos do ambiente padrão do launcher |
 | Ultrawide com câmera/HUD corrigidos | **Pendente** | O patch de câmera existente é limitado ao hash do EBOOT do 2; opção oculta |
 | Relocatable job lifts do 2 | **Não encontrados pelo scanner no EBOOT do 1** | Zero blobs com a assinatura esperada; não significa ausência de outros formatos |
-| Instalador/rebuild completo pelo launcher | **Pendente** | Receita herdada do 2 não é executada pelo launcher; build local CMake continua funcionando |
+| Instalador/rebuild completo pelo launcher | Religado (2026-11-11) | `rebuild.py` portado para o 1 e verificado pela linha de comando (lifts idênticos ao build testado, boot até o tutorial); a tela do launcher ainda não foi testada clicando |
 | Atualização automática | **Desativada nesta distribuição local** | Nenhum endpoint/chave de atualização do 2 fica ativo |
 
 Não há ganho de FPS medido decorrente desta adaptação do launcher. Recursos

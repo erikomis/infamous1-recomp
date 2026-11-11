@@ -7,13 +7,14 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 [NOTES.md](NOTES.md); the features brought from the inFAMOUS 2 port are in
 [PORT_FEATURES.md](PORT_FEATURES.md).
 
-## Status at a glance (2026-11-10)
+## Status at a glance (2026-11-11)
 
 - **Runs:** boot, studio logos, Bink videos, the 3D title screen, START, the opening explosion and Cole in the prologue tutorial ("Use the right stick to look up at the chopper"). Played headless with a scripted pad (`tools/play_prologue.sh`); the launcher also starts the game in a Metal window.
 - **Speed:** ~44 fps in the menu and cutscenes, headless, on Apple silicon (the console aimed at 30). Gameplay fps is not measured yet.
-- **App:** the macOS bundle builds, 72 tests pass (3 optional ones skipped), and its Play button starts the game (`BootCheck: type=2, titleId=NPUA80480`). The install/rebuild wizard and the self-update are disabled.
+- **Rebuild:** `infamous1-lle/tools/rebuild.py` builds the game from the player's copy in one command; from a clean folder it reproduced the tested build byte for byte and booted to the tutorial.
+- **App:** the macOS bundle builds, 72 tests pass (3 optional ones skipped), and its Play button starts the game (`BootCheck: type=2, titleId=NPUA80480`). The install/rebuild screen is on again (not clicked through yet); the self-update is off.
 - **Release:** none yet.
-- **What is left for a "1.0 playable on Mac":** play the whole story (nobody has gone past the tutorial) and fix what that turns up, move the lighting and SSAO jobs to the GPU for speed, and give the app a rebuild wizard and a release.
+- **What is left for a "1.0 playable on Mac":** play the whole story (nobody has gone past the tutorial) and fix what that turns up, move the lighting and SSAO jobs to the GPU for speed, and a release of the app.
 - **Not yet:** Windows and Linux.
 
 ## History
@@ -68,10 +69,11 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 
 ### Rebuild
 
-- [ ] Port `infamous1-lle/tools/rebuild.py` to this game. It is still the inFAMOUS 2 recipe: `--code-end 0x742e18` (here `0x55EB44`), the `Wws_Job` policy module cut from the EBOOT at `0x8D5B00` (here it is passed at run time), the data and relocatable modules (none here), the extra SPU entry points and the expected EBOOT hashes of inFAMOUS 2 1.03 (here APP_VER 01.00, SHA-256 `5e22402a…`). The manual recipe is in [`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding).
-- [ ] An install/rebuild wizard in the app, on top of the ported `rebuild.py`. The inherited one is disabled; today the build is the local CMake in `infamous1-lle`.
+- [x] Port `infamous1-lle/tools/rebuild.py` to this game (2026-11-11). It was the inFAMOUS 2 recipe. Now: `--code-end 0x55EB44`; the `Wws_Job` policy module cut from guest `0x69E400` (11,648 bytes, found through the program headers; the inFAMOUS 2 one was at `0x8E5B00`); the audio image relifted with its call returns (`relift_spu_returns.py`); `jobmod_542edebc6499_e80` relifted with `0x18BB0`; no data or relocatable modules; the tested EBOOT is APP_VER 01.00, SHA-256 `5e22402a…`.
+- [x] A `rebuild.py` run end to end into a clean folder: every step passed (DLC skipped, there is none), `lle/`, `lle_spu/`, `recompiled/` and the whole `spu/` came out byte for byte the same as the tested build, and the new binary went from the logos through the title screen and the blast to the tutorial in a 200 s headless run, with no SPU abort.
+- [ ] The install/rebuild screen in the app: turned on again (it runs `rebuild.py`), not clicked through yet.
+- [ ] The toolkit step from a network clone inside `rebuild.py` (the run above used `--toolkit` on a clean clone that `setup_toolkit.sh` had patched).
 - [ ] Look for the relocatable job lifts of inFAMOUS 2 in this EBOOT in other formats: the scanner found zero blobs with the expected signature (that does not rule out other formats).
-- [ ] A `rebuild.py` run end to end from a clean checkout.
 
 ---
 

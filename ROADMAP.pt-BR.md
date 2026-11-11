@@ -7,13 +7,14 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 [NOTES.md](NOTES.md); os recursos trazidos do port do inFAMOUS 2 estão em
 [PORT_FEATURES.md](PORT_FEATURES.md).
 
-## Estado em resumo (2026-11-10)
+## Estado em resumo (2026-11-11)
 
 - **Roda:** boot, logos dos estúdios, vídeos Bink, a tela inicial 3D, START, a explosão de abertura e o Cole no tutorial do prólogo ("Use the right stick to look up at the chopper"). Jogado headless com um controle por script (`tools/play_prologue.sh`); o launcher também inicia o jogo numa janela Metal.
 - **Velocidade:** ~44 fps no menu e nas cutscenes, headless, em Apple silicon (o console mirava 30). O fps em gameplay ainda não foi medido.
-- **App:** o bundle macOS compila, 72 testes passam (3 opcionais ignorados) e o botão Jogar inicia o jogo (`BootCheck: type=2, titleId=NPUA80480`). O assistente de instalação/rebuild e a atualização automática estão desativados.
+- **Rebuild:** o `infamous1-lle/tools/rebuild.py` compila o jogo a partir da cópia do jogador num comando; numa pasta limpa ele reproduziu o build testado byte a byte e bootou até o tutorial.
+- **App:** o bundle macOS compila, 72 testes passam (3 opcionais ignorados) e o botão Jogar inicia o jogo (`BootCheck: type=2, titleId=NPUA80480`). A tela de instalação/rebuild foi religada (ainda não testada clicando); a atualização automática está desligada.
 - **Release:** nenhum ainda.
-- **O que falta para um "1.0 jogável no Mac":** jogar a história inteira (ninguém passou do tutorial) e corrigir o que aparecer, levar os jobs de iluminação e SSAO para a GPU por velocidade, e dar ao app um assistente de rebuild e um release.
+- **O que falta para um "1.0 jogável no Mac":** jogar a história inteira (ninguém passou do tutorial) e corrigir o que aparecer, levar os jobs de iluminação e SSAO para a GPU por velocidade, e um release do app.
 - **Ainda não:** Windows e Linux.
 
 ## Histórico
@@ -68,10 +69,11 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 
 ### Rebuild
 
-- [ ] Portar o `infamous1-lle/tools/rebuild.py` para este jogo. Ele ainda é a receita do inFAMOUS 2: `--code-end 0x742e18` (aqui `0x55EB44`), o policy module `Wws_Job` recortado do EBOOT em `0x8D5B00` (aqui ele é passado em tempo de execução), os módulos de dados e relocáveis (nenhum aqui), os entry points SPU extras e os hashes esperados do EBOOT do inFAMOUS 2 1.03 (aqui APP_VER 01.00, SHA-256 `5e22402a…`). A receita manual está em [`infamous1-lle/README.md`](infamous1-lle/README.md#rebuilding).
-- [ ] Um assistente de instalação/rebuild no app, sobre o `rebuild.py` portado. O herdado está desativado; hoje o build é o CMake local em `infamous1-lle`.
+- [x] Portar o `infamous1-lle/tools/rebuild.py` para este jogo (2026-11-11). Ele era a receita do inFAMOUS 2. Agora: `--code-end 0x55EB44`; o policy module `Wws_Job` recortado do endereço `0x69E400` (11.648 bytes, achado pelos program headers; o do inFAMOUS 2 ficava em `0x8E5B00`); a image de áudio com relift dos retornos de chamada (`relift_spu_returns.py`); o `jobmod_542edebc6499_e80` com relift em `0x18BB0`; sem módulos de dados nem relocáveis; o EBOOT testado é APP_VER 01.00, SHA-256 `5e22402a…`.
+- [x] Um `rebuild.py` de ponta a ponta numa pasta limpa: todos os passos passaram (DLC pulado, não existe), `lle/`, `lle_spu/`, `recompiled/` e o `spu/` inteiro saíram idênticos byte a byte ao build testado, e o binário novo foi dos logos, pela tela inicial e a explosão, até o tutorial numa execução headless de 200 s, sem abort de SPU.
+- [ ] A tela de instalação/rebuild do app: religada (ela roda o `rebuild.py`), ainda não testada clicando.
+- [ ] O passo do toolkit clonando pela rede dentro do `rebuild.py` (a execução acima usou `--toolkit` num clone limpo que o `setup_toolkit.sh` tinha preparado).
 - [ ] Procurar os relocatable job lifts do inFAMOUS 2 neste EBOOT em outros formatos: o scanner achou zero blobs com a assinatura esperada (isso não exclui outros formatos).
-- [ ] Um `rebuild.py` de ponta a ponta a partir de um checkout limpo.
 
 ---
 
