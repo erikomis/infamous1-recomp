@@ -12,32 +12,32 @@
 (() => {
   const flags = window.__UI_MOCK__ || {};
   const settings = {
-    uiLang: "pt-BR", installDir: "/Users/player/Library/Application Support/infamous2-recomp/install",
+    uiLang: "pt-BR", installDir: "/Users/player/Library/Application Support/infamous1-recomp/install",
     gameLang: "pt", voiceLang: "english", textLang: "", gpuLight: true, gpuSsao: true, skipOcclusionVolumes: false, gammaOverride: false, gamma: 1.0,
     aniso: 8, aa: "fxaa", sharpen: 0.35, upscale: "metalfx", mouse: true, mouseSens: 1.25, mouseInvertY: false,
     mouseInvertX: false, mouseDeadzone: 30, mouseCapture: true, windowMode: "windowed", windowSize: "1920x1080",
     gameIcon: false, display: "", vsync: true, audioVolume: 85, audioDevice: "", rumble: true, rumbleStrength: 100,
-    showFps: false, extraEnv: "", gamePaths: ["/Users/player/Library/Application Support/rpcs3/dev_hdd0/game/NPUA80638"],
-    rapPath: "/Users/player/Library/Application Support/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80638_00-XXXXXXXXXXXXXXXX.rap",
+    showFps: false, extraEnv: "", gamePaths: ["/Users/player/Library/Application Support/rpcs3/dev_hdd0/game/NPUA80480"],
+    rapPath: "/Users/player/Library/Application Support/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80480_00-XXXXXXXXXXXXXXXX.rap",
     keysPath: "", firmwarePath: "", decryptWith: "auto", saveBackupsKeep: 10, autoUpdateCheck: true,
   };
   const now = Math.floor(Date.now() / 1000);
   const install = {
-    layout: "install", title: "inFAMOUS 2", appVer: "01.03", runSh: "/x/run.sh", executable: "/x/Infamous2Recomp",
+    layout: "install", title: "inFAMOUS", appVer: "01.00", runSh: "/x/run.sh", executable: "/x/Infamous1Recomp",
     builtAt: new Date((now - 86400) * 1000).toISOString(), portCommit: "89216bb",
   };
   const save = (side, user, name, sub, detail, mod) => ({
-    side, user, name, path: `/saves/${name}`, title: "inFAMOUS 2", subtitle: sub, detail, modified: mod,
+    side, user, name, path: `/saves/${name}`, title: "inFAMOUS", subtitle: sub, detail, modified: mod,
     size: 412000, files: 4, icon: null, stateHash: "abc", sfo: side === "port" ? "text" : "binary",
   });
   const log = [
     "[run.sh] PS3_LANG=pt PS3_UPSCALE=metalfx PS3_AA=fxaa",
-    "[boot] Infamous2Recomp starting (port 89216bb)",
+    "[boot] Infamous1Recomp starting (port 89216bb)",
     "[vfs] mounted /dev_hdd0, /dev_flash",
     "[rsx] Metal device: Apple M4 Pro",
     "[rsx] MetalFX spatial scaler 1280x720 -> 1920x1080",
     "[spurs] 5 SPU threads, light pass on the GPU, SSAO on the GPU",
-    "[cellSaveData] loaded NPUA80638-AUTO-",
+    "[cellSaveData] loaded BCUS98119_INFAMOUS_0",
     "[warn] cellGame: stub cellGameGetParamInt(id=5)",
     "[RSX FPS] display 30.0 game 30.0 frame 33.3 ms",
     "[RSX FPS] display 30.0 game 29.9 frame 33.5 ms",
@@ -52,7 +52,7 @@
       text: ["brazilian", "british", "chinese", "dutch", "english", "french", "german", "italian", "japanese", "korean", "latino", "polish", "portuguese", "russian", "spanish", "turkish"],
     }),
     list_trophies: () => ({
-      commId: "NPWR01730", title: "inFAMOUS 2",
+      commId: "NPWR01730", title: "inFAMOUS",
       trophies: [
         { id: 0, grade: "P", name: "Troféu de Platina do inFAMOUS 2", detail: "Ganhe todos os troféus.", hidden: false, unlockedAt: 0, icon: "" },
         { id: 1, grade: "G", name: "A Dor Cria Carácter", detail: "Complete o jogo no modo difícil.", hidden: false, unlockedAt: 0, icon: "" },
@@ -62,21 +62,21 @@
     }),
     get_status: () => ({
       installDir: settings.installDir, install: flags.notInstalled ? null : install, installError: null, icon: null, background: null,
-      lastSave: { title: "inFAMOUS 2", subtitle: "(Auto) 7. Sangue no gelo", detail: "Progresso: 34%\nKarma: Herói", modified: now - 3600 * 5, folder: "/saves/x" },
+      lastSave: { title: "inFAMOUS", subtitle: "Jogo salvo 2", detail: "Progresso: 34%\nKarma: Herói", modified: now - 3600 * 5, folder: "/saves/x" },
       gameRunning: !!flags.running, rebuildRunning: false, rebuildScript: "/x/rebuild.py", dataRoot: "/x", defaultInstallDir: settings.installDir,
-      hostSupported: true, os: "macos", appBundle: "/Applications/infamous2-recomp.app", finderIcon: false,
+      hostSupported: true, os: "macos", appBundle: "/Applications/infamous1-recomp.app", finderIcon: false,
     }),
     check_updates: () => ({
       appVersion: "0.2.6", sourcesCommit: "89216bb", installedCommit: "89216bb", rebuildSuggested: false, disabled: false,
       checkedOnline: true, latestVersion: flags.update ? "0.2.7" : "0.2.6",
-      latestUrl: "https://github.com/erikomis/infamous2-recomp/releases/tag/v0.2.7",
+      latestUrl: "https://github.com/erikomis/infamous1-recomp/releases/tag/v0.2.7",
       latestNotes: flags.update ? "Launcher v0.2.7. It ships no game files: it rebuilds the game from your own copy." : null,
       latestDate: "2026-10-23T12:00:00Z", newerRelease: !!flags.update, checkError: null, installBlocker: null, installedPending: null,
     }),
     install_update: () => new Promise((r) => setTimeout(() => r("0.2.7"), 1500)),
     steam_status: () => ({ available: true, installed: true, running: false, users: 1, added: flags.steamAdded ? 1 : 0 }),
     list_outputs: () => ({ screens: ["Tela Retina integrada", "DELL U2720Q"], audioOutputs: ["Alto-falantes (MacBook Pro)", "AirPods Pro"] }),
-    get_input_map: () => ({ path: "/Users/player/Library/Application Support/infamous2-recomp/input.toml", exists: true, bindings: { keyboard: {}, mouseButtons: {}, controller: {} } }),
+    get_input_map: () => ({ path: "/Users/player/Library/Application Support/infamous1-recomp/input.toml", exists: true, bindings: { keyboard: {}, mouseButtons: {}, controller: {} } }),
     save_input_map: () => "/x/input.toml",
     report_info: () => (flags.running
       ? { dir: "/x/reports/20261018T130000Z", id: "20261018T130000Z", live: true, captures: 2, pending: false, surfaces: 412, shaders: 96, bytes: 512000000, zip: null, zipBytes: 0 }
@@ -104,17 +104,17 @@
       checks: ["host", "xcode-clt", "python", "cmake", "ninja", "sdl2", "glslang", "spirv-cross", "rpcs3", "firmware", "disk"].map((n) => ({ level: "ok", name: n, message: "ok" })),
       brewMissing: [], rpcs3Missing: false, firmwareMissing: false, ok: true, error: null,
     }),
-    detect_rpcs3: () => ({ gameDir: settings.gamePaths[0], title: "inFAMOUS 2", appVer: "01.03", contentId: "UP9000-NPUA80638_00", raps: [settings.rapPath], searched: [] }),
+    detect_rpcs3: () => ({ gameDir: settings.gamePaths[0], title: "inFAMOUS", appVer: "01.00", contentId: "UP9000-NPUA80480_00", raps: [settings.rapPath], searched: [] }),
     find_licence: () => answers.detect_rpcs3(),
     saves_overview: () => ({
-      port: [save("port", "00000001", "NPUA80638-AUTO-", "(Auto) 7. Sangue no gelo", "Progresso: 34%", now - 3600 * 5)],
-      rpcs3: [save("rpcs3", "00000001", "NPUA80638-AUTO-", "(Auto) 5. A chegada", "Progresso: 21%", now - 86400 * 9)],
+      port: [save("port", "00000001", "BCUS98119_INFAMOUS_0", "Jogo salvo 2", "Progresso: 34%", now - 3600 * 5)],
+      rpcs3: [save("rpcs3", "00000001", "BCUS98119_INFAMOUS_0", "Jogo salvo 1", "Progresso: 21%", now - 86400 * 9)],
       rpcs3Users: ["00000001"],
-      backups: [{ id: "20261018T101500Z-port-before-play", created: now - 3600 * 6, reason: "before-play", source: "port", user: "00000001", slots: ["NPUA80638-AUTO-"], trophies: true, size: 523000, labels: { "NPUA80638-AUTO-": "(Auto) 7. Sangue no gelo" } }],
+      backups: [{ id: "20261018T101500Z-port-before-play", created: now - 3600 * 6, reason: "before-play", source: "port", user: "00000001", slots: ["BCUS98119_INFAMOUS_0"], trophies: true, size: 523000, labels: { "BCUS98119_INFAMOUS_0": "Jogo salvo 2" } }],
       portDir: "/x/savedata", rpcs3Dir: "/x/rpcs3/home", backupsDir: "/x/save-backups", gameRunning: false, rpcs3Running: false,
     }),
-    launch_preview: () => "INFAMOUS2_VFS=/x/vfs PS3_LANG=pt PS3_ANISO=8 PS3_AA=fxaa PS3_SHARPEN=0.35 PS3_UPSCALE=metalfx PS3_WINDOW_SIZE=1920x1080 PS3_AUDIO_VOLUME=85 /x/run.sh",
-    read_game_log: () => ({ path: "/Users/player/Library/Application Support/infamous2-recomp/logs/game.log", exists: true, size: log.length, modified: now - 120, text: log, truncated: false }),
+    launch_preview: () => "INFAMOUS1_VFS=/x/vfs PS3_LANG=pt PS3_ANISO=8 PS3_AA=fxaa PS3_SHARPEN=0.35 PS3_UPSCALE=metalfx PS3_WINDOW_SIZE=1920x1080 PS3_AUDIO_VOLUME=85 /x/run.sh",
+    read_game_log: () => ({ path: "/Users/player/Library/Application Support/infamous1-recomp/logs/game.log", exists: true, size: log.length, modified: now - 120, text: log, truncated: false }),
     log_paths: () => ({ game: "/x/game.log", saves: "/x/gamedata" }),
     finder_icon: (args) => args.set,
   };
