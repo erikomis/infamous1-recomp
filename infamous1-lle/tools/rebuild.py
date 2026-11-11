@@ -97,6 +97,7 @@ PUP_EXTRACT = os.path.join(HERE, 'pup_extract.py')
 
 # Port files copied into <out>/infamous1-lle (the build's sources and tools).
 PORT_FILES = ('CMakeLists.txt', 'main.cpp', 'stubs.cpp', 'gpu_light.c', 'gpu_ssao.c',
+              'runtime_overrides/cellGame.c',   # HDD boot: CATEGORY from PARAM.SFO
               'ssao_gpu.c', 'ssao_gpu.h', 'edge_watch.c', 'game_clock.c', 'game_patches.cpp', 'run.sh', 'config.toml',
               'macos_host.m',      # App Nap off, thread QoS (macOS)
               'Info.plist.in',     # the macOS app bundle's Info.plist (Game Mode)
@@ -1072,6 +1073,7 @@ class Rebuild:
                 with open(s, 'rb') as fs, open(d, 'rb') as fd:
                     if fs.read() == fd.read():
                         continue
+            os.makedirs(os.path.dirname(d), exist_ok=True)
             shutil.copy2(s, d)       # unchanged files keep their mtime: no needless recompile
             n += 1
         log('%d port file(s) updated in %s' % (n, self.port))
