@@ -11,7 +11,7 @@ ports desta máquina. Rodando em macOS/arm64 (Apple M4 Pro), headless.
 
 A lista de problemas do jogo original levantada pelo Erik (FPS, aliasing,
 pop-in, câmera, escalada, combate, IA, missões, checkpoints, texturas) virou
-roadmap priorizado com plano técnico por item: **ROADMAP_JOGO.md** (na raiz,
+roadmap priorizado com plano técnico por item: **ROADMAP.md** (na raiz,
 referenciado também pelo PORT_FEATURES.md). Estado já validado até aqui:
 aniso 16× ok, ~44 fps no menu/cutscene; candidato do job de luz anotado
 abaixo (image 209) para o próximo passo do GPU light.

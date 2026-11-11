@@ -4,7 +4,7 @@ Revisão de 2026-11-10. O inFAMOUS 1 continua usando seu próprio EBOOT,
 firmware levantado, registro SPU, boot HDD e correções de retornos SPU.
 
 Correções dos problemas do jogo original (FPS, aliasing, texturas, câmera,
-escalada etc.) são planejadas em [ROADMAP_JOGO.md](ROADMAP_JOGO.md).
+escalada etc.) são planejadas em [ROADMAP.md](ROADMAP.md).
 
 | Recurso | Estado neste port | Validação / limite |
 |---|---|---|

@@ -15,14 +15,15 @@ This port only exists because of the work below. Thank you all.
   ([@NoahBPeterson](https://github.com/NoahBPeterson)), branch
   `infamous/rebase-v0.13.0`, upstream
   [PR #213](https://github.com/sp00nznet/ps3recomp/pull/213). The current port
-  (`infamous2-lle/`) runs on this fork: boot with the firmware in LLE
+  (`infamous1-lle/`) runs on this fork: boot with the firmware in LLE
   (liblv2, libsysmodule, libsre), the PPU/SPU/lv2 fixes and the conformance
-  suites that got inFAMOUS 1 running on macOS. Without that work inFAMOUS 2
-  would not have made it past the first frame.
+  suites that got inFAMOUS 1 running on macOS. Without that work this port would not
+  have made it past the first frame. The launcher and the shared runtime come
+  from the [inFAMOUS 2 port](https://github.com/erikomis/infamous2-recomp).
 
 ## Upstream pull requests applied
 
-Original diffs in `infamous2-lle/patches/upstream-prs/`.
+Original diffs in `infamous1-lle/patches/upstream-prs/`.
 
 - [@undecuple](https://github.com/undecuple) —
   [#297](https://github.com/sp00nznet/ps3recomp/pull/297) (lifter: `sc` does not end a function),
@@ -43,9 +44,9 @@ Original diffs in `infamous2-lle/patches/upstream-prs/`.
 - [sp00nznet/tornado](https://github.com/sp00nznet/tornado) — recipe for
   capturing and translating the Wwise SPURS jobs (`tools/lift_spu_jobs.sh`).
 - [sp00nznet/youdontknowjack](https://github.com/sp00nznet/youdontknowjack) —
-  loading pattern for the translated libsre (`infamous2/prx_init.cpp`).
+  loading pattern for the translated libsre (`infamous1/prx_init.cpp`).
 - The toolkit's LittleBigPlanet WWS job-module path
-  (`tools/lift_jobmods.py`), used here for inFAMOUS 2's 27 modules.
+  (`tools/lift_jobmods.py`), used here for inFAMOUS 1's job modules.
 
 ## Tools
 
@@ -70,7 +71,7 @@ Original diffs in `infamous2-lle/patches/upstream-prs/`.
 
 ## Game
 
-inFAMOUS 2 © 2011 Sony Computer Entertainment America LLC, developed by
+inFAMOUS © 2009 Sony Computer Entertainment America LLC, developed by
 Sucker Punch Productions. This project is not affiliated with or endorsed by
 Sony or Sucker Punch, and contains no game or firmware data. To use it you
 need a legitimate copy of the game and your own PS3/firmware.
