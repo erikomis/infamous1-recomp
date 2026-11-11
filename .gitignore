@@ -1,0 +1,35 @@
+# Toolkit checkouts (tools/setup_toolkit.sh recreates the one the port uses)
+/ps3recomp/
+/ps3recomp-fork/
+/ps3recomp-merge/
+/ps3recomp-pr/
+/ps3recomp-up/
+/.venv/
+
+# Game, firmware, keys and everything generated from them stay local.
+game/
+gamedata/
+fw/
+vfs/
+recompiled/
+prx/
+lle/
+lle_spu/
+spu/
+spu_miss/
+out/
+build/
+self_keys.txt
+
+# Launcher build output
+node_modules/
+dist/
+target/
+src-tauri/target/
+__pycache__/
+
+.DS_Store
+
+# Stray captures and logs
+infamous1-lle/1
+*.log
