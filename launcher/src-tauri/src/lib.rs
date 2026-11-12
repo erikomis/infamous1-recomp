@@ -8,6 +8,7 @@ mod app_icon;
 mod input_map;
 mod mods;
 mod play_shortcut;
+mod prepare;
 mod report;
 mod saves;
 mod steam;
@@ -611,12 +612,18 @@ fn kill_tree(pid: u32) {
 /// lives in <repo>/launcher), or in the app's bundled resources (port/, staged by
 /// launcher/scripts/stage_port.py).
 fn rebuild_script(app: &AppHandle) -> Option<PathBuf> {
+    rebuild_script_in(app.path().resource_dir().ok())
+}
+
+/// rebuild_script with the bundle's resource folder given (the headless
+/// prepare has no AppHandle: prepare::resource_dir).
+fn rebuild_script_in(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     let mut cands = Vec::new();
     if let Some(r) = std::env::var_os("INFAMOUS1_REPO") {
         cands.push(PathBuf::from(r).join("infamous1-lle/tools/rebuild.py"));
     }
     cands.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../infamous1-lle/tools/rebuild.py"));
-    if let Ok(res) = app.path().resource_dir() {
+    if let Some(res) = resource_dir {
         cands.push(res.join("port/infamous1-lle/tools/rebuild.py"));
     }
     cands.into_iter().find(|p| p.is_file()).map(|p| p.canonicalize().unwrap_or(p))
@@ -924,16 +931,21 @@ fn get_settings() -> Settings {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+    write_settings_file(&settings)?;
+    sync_app_icon(&app); // "Your copy's icon in the Dock" may have changed
+    Ok(())
+}
+
+/// launcher.json written whole, through a temporary file.
+fn write_settings_file(settings: &Settings) -> Result<(), String> {
     let p = settings_path();
     if let Some(d) = p.parent() {
         fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
     let tmp = p.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?)
+    fs::write(&tmp, serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
-    sync_app_icon(&app); // "Your copy's icon in the Dock" may have changed
-    Ok(())
+    fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
 /// The controls file for the Controls screen: what it binds (the screen
@@ -1755,34 +1767,7 @@ fn start_rebuild(app: AppHandle, state: State<'_, AppState>, req: RebuildRequest
     }
     let script = rebuild_script(&app).ok_or("rebuild.py not found (set INFAMOUS1_REPO to the repository)")?;
     let python = find_python().ok_or("Python 3 not found (install the Xcode Command Line Tools)")?;
-    let mut cmd = Command::new(&python);
-    cmd.arg("-u").arg(&script);
-    for g in &req.games {
-        cmd.arg("--game").arg(g);
-    }
-    if !req.rap.is_empty() {
-        cmd.arg("--rap").arg(&req.rap);
-    }
-    if !req.out.is_empty() {
-        cmd.arg("--out").arg(&req.out);
-    }
-    if req.dry_run {
-        cmd.arg("--dry-run");
-    }
-    if req.force {
-        cmd.arg("--force");
-    }
-    apply_decrypt(&mut cmd, &req.decrypt)?;
-    cmd.arg("--nice").arg("10"); // the machine stays usable while it compiles
-    cmd.env("PATH", tool_path());
-    match req.rap_key.as_deref().map(str::trim) {
-        Some(k) if !k.is_empty() => {
-            cmd.env("PS3_RAP_KEY", k);
-        }
-        _ => {
-            cmd.env_remove("PS3_RAP_KEY");
-        }
-    }
+    let mut cmd = rebuild_command(&python, &script, &req)?;
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     own_process_group(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", python.display()))?;
@@ -1810,6 +1795,40 @@ fn start_rebuild(app: AppHandle, state: State<'_, AppState>, req: RebuildRequest
         let _ = a3.emit("rebuild-exit", code);
     });
     Ok(())
+}
+
+/// `python -u rebuild.py` with the request's arguments and environment (the
+/// window's Install and the headless prepare); stdio is the caller's.
+fn rebuild_command(python: &Path, script: &Path, req: &RebuildRequest) -> Result<Command, String> {
+    let mut cmd = Command::new(python);
+    cmd.arg("-u").arg(script);
+    for g in &req.games {
+        cmd.arg("--game").arg(g);
+    }
+    if !req.rap.is_empty() {
+        cmd.arg("--rap").arg(&req.rap);
+    }
+    if !req.out.is_empty() {
+        cmd.arg("--out").arg(&req.out);
+    }
+    if req.dry_run {
+        cmd.arg("--dry-run");
+    }
+    if req.force {
+        cmd.arg("--force");
+    }
+    apply_decrypt(&mut cmd, &req.decrypt)?;
+    cmd.arg("--nice").arg("10"); // the machine stays usable while it compiles
+    cmd.env("PATH", tool_path());
+    match req.rap_key.as_deref().map(str::trim) {
+        Some(k) if !k.is_empty() => {
+            cmd.env("PS3_RAP_KEY", k);
+        }
+        _ => {
+            cmd.env_remove("PS3_RAP_KEY");
+        }
+    }
+    Ok(cmd)
 }
 
 #[tauri::command]
@@ -1960,23 +1979,14 @@ fn play(app: AppHandle, state: State<'_, AppState>, diagnostic: Option<bool>) ->
         Err(e) => (None, Some(e)),
     };
 
-    // run.sh is the single source of the defaults; the settings only override.
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg(&inst.run_sh)
-        .current_dir(&inst.port_dir)
-        .env("PATH", tool_path())
-        .env_remove("HEADLESS")
-        .env_remove("PS3RECOMP_METAL_HEADLESS")
-        .stdin(Stdio::null())
-        .stdout(log)
-        .stderr(log2);
-    let mut env = launch_env(&s, &inst, &input_env());
-    game_window_icon(&s, &mut env);
+    let (mut cmd, mut env) = run_sh_command(&s, &inst);
+    cmd.stdin(Stdio::null()).stdout(log).stderr(log2);
     if let Some(d) = &report_dir {
-        env.extend(report::env(d)); // after the extra variables: the report's paths win
-    }
-    for (k, v) in &env {
-        cmd.env(k, v);
+        let r = report::env(d); // after the extra variables: the report's paths win
+        for (k, v) in &r {
+            cmd.env(k, v);
+        }
+        env.extend(r);
     }
     own_process_group(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", inst.run_sh))?;
@@ -2022,6 +2032,25 @@ fn play(app: AppHandle, state: State<'_, AppState>, diagnostic: Option<bool>) ->
         backup_error,
         report: report_dir.map(|d| d.to_string_lossy().into_owned()),
     })
+}
+
+/// Play's `/bin/sh run.sh` with the settings in its environment (the window's
+/// Play and `--play` under RecompLauncher), and that environment. run.sh is
+/// the single source of the defaults; the settings only override. Stdio is
+/// the caller's.
+fn run_sh_command(s: &Settings, inst: &InstallInfo) -> (Command, Vec<(String, String)>) {
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg(&inst.run_sh)
+        .current_dir(&inst.port_dir)
+        .env("PATH", tool_path())
+        .env_remove("HEADLESS")
+        .env_remove("PS3RECOMP_METAL_HEADLESS");
+    let mut env = launch_env(s, inst, &input_env());
+    game_window_icon(s, &mut env);
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    (cmd, env)
 }
 
 fn now_ms() -> u64 {
@@ -2563,14 +2592,23 @@ async fn saves_import_zip(state: State<'_, AppState>, path: String) -> Result<sa
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Decided before any window exists: `--prepare` (the headless install)
+    // and `--play` under RecompLauncher (RECOMPLAUNCHER=1) never start the
+    // Tauri event loop; they exit with their own codes (prepare.rs).
+    let args: Vec<String> = std::env::args().collect();
+    let play_ok = match prepare::mode(&args, prepare::under_recomplauncher()) {
+        prepare::Mode::Prepare { game } => std::process::exit(prepare::prepare_main(game.as_deref())),
+        prepare::Mode::PlayDirect { game } => std::process::exit(prepare::play_direct(game.as_deref())),
+        prepare::Mode::Window { game } => prepare::window_game(game.as_deref()),
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .setup(|app| {
+        .setup(move |app| {
             sync_app_icon(app.handle()); // the player's icon in the Dock from the start
             let args: Vec<String> = std::env::args().collect();
             let st = app.state::<AppState>();
-            *st.play_request.lock().unwrap() = play_shortcut::requested(args.iter().cloned());
+            *st.play_request.lock().unwrap() = play_ok && play_shortcut::requested(args.iter().cloned());
             *st.exit_with_game.lock().unwrap() = play_shortcut::exit_requested(&args);
             Ok(())
         })

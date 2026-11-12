@@ -99,6 +99,7 @@ In inFAMOUS 2 this took the New Marais walk from 12 to 15 fps and from 21 to 28 
 - [ ] Install/rebuild wizard (see Rebuild).
 - [ ] Self-update with its own endpoint and key; the inFAMOUS 2 ones are not active.
 - [ ] A signed release `.dmg`.
+- [ ] RecompLauncher: the profile (`recomplauncher.json`), the launcher's headless `--prepare` and `--play`, and `scripts/package-recomplauncher.sh` are in (2026-11-12); a release with that zip attached, a full prepare on a clean Mac, and the listing on recomplauncher.com are still to do (launcher README, "RecompLauncher").
 
 ### Other platforms
 

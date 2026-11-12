@@ -99,6 +99,7 @@ No inFAMOUS 2 isso levou a caminhada de New Marais de 12 para 15 fps e de 21 par
 - [ ] Assistente de instalação/rebuild (veja Rebuild).
 - [ ] Atualização automática com endpoint e chave próprios; os do inFAMOUS 2 não estão ativos.
 - [ ] Um `.dmg` de release assinado.
+- [ ] RecompLauncher: o perfil (`recomplauncher.json`), o `--prepare` e o `--play` sem janela do launcher e o `scripts/package-recomplauncher.sh` já estão aqui (2026-11-12); falta uma release com esse zip, um prepare completo num Mac limpo e a listagem no recomplauncher.com (README do launcher, "RecompLauncher").
 
 ### Outras plataformas
 
