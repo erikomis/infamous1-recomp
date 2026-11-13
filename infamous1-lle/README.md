@@ -53,9 +53,20 @@ applied by `../tools/setup_toolkit.sh`): the inFAMOUS 2 port's patch, plus
   pipelines build on a worker pool and each encode waits for the ones it uses,
   so no draw is skipped (`PS3_SHADER_PARALLEL=0` builds them inline as
   before). The MSL translation is unchanged, so shader caches stay valid.
+- **`cellPad_host_pulse` (from the inFAMOUS 2 port):** a host pulse on a
+  port's motors, each at the stronger of the game's rumble and the pulse,
+  `PS3_RUMBLE`/`STRENGTH` applied, lapsing 300 ms after its last call; the
+  light bar glows red with it, the adaptive trigger's buzz does not.
+  Test: `libs/input/tests/test_pad_pulse.c`.
 
 In the port:
 
+- `heartbeat.c`: below 35% of Cole's hit points (`[0x8F7580]` `+0x750` max,
+  `+0x754` current, found as `notes/health/README.md` tells) a lub-dub on the
+  motors through `cellPad_host_pulse`, silent while the world clock is stopped
+  (`0x7BC7E0`). `PS3_HEARTBEAT=0` off, `PS3_HEARTBEAT_AT`, `_STRENGTH`,
+  `_LOG=1|2`; `-DPORT_HEARTBEAT_POKE=ON` builds the `PS3_HEARTBEAT_POKE`
+  check. Test: `tests/test_heartbeat.c`.
 - `runtime_overrides/cellGame.c` reads `CATEGORY` from `PARAM.SFO` (`HG`) and
   reports an HDD boot; `run.sh` passes `PS3_BOOT_PATH`. Test:
   `tests/test_game_boot.c`.

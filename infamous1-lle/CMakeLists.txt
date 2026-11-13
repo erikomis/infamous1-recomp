@@ -195,6 +195,14 @@ endif()
 list(LENGTH LLE_SOURCES LLE_SOURCE_COUNT)
 message(STATUS "Firmware LLE:    ${LLE_SOURCE_COUNT} file(s)")
 
+# heartbeat.c's check build: PS3_HEARTBEAT_POKE writes Cole's hit points at
+# given times, to watch the heartbeat (and the game's own low-health picture)
+# come and go in a scripted run. Never on in a build that is played.
+option(PORT_HEARTBEAT_POKE "heartbeat.c: compile the PS3_HEARTBEAT_POKE test knob" OFF)
+if(PORT_HEARTBEAT_POKE)
+    set_source_files_properties(heartbeat.c PROPERTIES COMPILE_DEFINITIONS HEARTBEAT_POKE)
+endif()
+
 add_executable(${PROJECT_NAME}
     main.cpp
     runtime_overrides/cellGame.c
@@ -203,6 +211,7 @@ add_executable(${PROJECT_NAME}
     gpu_ssao.c
     edge_watch.c
     game_clock.c
+    heartbeat.c
     game_patches.cpp
     ssao_gpu.c
     ${LLE_SOURCES}

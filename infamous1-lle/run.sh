@@ -172,6 +172,9 @@ export GCM_PARK_GRACE_MS="${GCM_PARK_GRACE_MS:-1000}"
 #                               in the middle (restart to change)
 # Sound and controller (README "Playing"): PS3_AUDIO_VOLUME=0..100,
 # PS3_AUDIO_DEVICE=<output name>, PS3_RUMBLE=0, PS3_RUMBLE_STRENGTH=0..200.
+# PS3_HEARTBEAT=0 (no heartbeat on the motors while Cole is below 35% health;
+# heartbeat.c: PS3_HEARTBEAT_AT=5..90 the percentage, PS3_HEARTBEAT_STRENGTH=
+# 0..200, PS3_HEARTBEAT_LOG=1 prints his health and the beats).
 # It resizes freely and the image stays 16:9, letterboxed. Cmd+F or
 # Option+Return toggles fullscreen, Cmd+Ctrl+F macOS fullscreen; a click in
 # the game captures the mouse, Esc or Cmd releases it.
