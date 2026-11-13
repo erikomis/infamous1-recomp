@@ -55,7 +55,7 @@ Veja [CREDITS.pt-BR.md](CREDITS.pt-BR.md).
 | Filtragem anisotrópica até 16× | ✅ verificada neste jogo |
 | Resolução interna, MetalFX, FXAA/SMAA, nitidez, cor | 🧪 pelo runtime compartilhado e pelo launcher, opções mapeadas; sem A/B visual por combinação ainda |
 | Controle, teclado e mouse, vibração | 🧪 adaptados no launcher, bindings testados; nem todas as combinações de dispositivos |
-| Gatilhos adaptáveis do DualSense | 🧪 o gatilho do raio tem clique, o outro resistência; testado em unidade, ainda não sentido num controle |
+| Gatilhos adaptáveis, barra de luz, luzes de jogador e mira por giroscópio do DualSense | 🧪 testados em unidade; ainda não provados num controle (feche a Steam antes) |
 | Menu no jogo (F1 / Cmd+, / L3+R3) | 🧪 runtime compartilhado, ainda não verificado neste jogo |
 | Saves e troféus, gerenciador de saves no app | ✅ saves locais `BCUS98119_INFAMOUS_*` reconhecidos, saves do inFAMOUS 2 rejeitados |
 | O app: jogar, ajustes, controles, saves, logs | ✅ bundle macOS gerado, 72 testes passam, a janela inicia o jogo |
@@ -206,6 +206,17 @@ de gatilho de arma: conta como apertado no clique, mais ou menos na metade
 outro gatilho, de mirar com o L1 ligado a ele, tem uma resistência leve. Os
 dois ficam livres quando o jogo fecha. O jogo registra
 `adaptive triggers on (fires with the right trigger at 50%)` no log.
+
+O resto do DualSense (e a barra de luz e o giroscópio de um DualShock 4): as
+luzes de jogador mostram a porta; a barra de luz é o azul elétrico do Cole
+(`PS3_PAD_LIGHT=<RRGGBB>|off`) e fica vermelha enquanto o jogo liga os
+motores (`PS3_PAD_LIGHT_HIT=0` a deixa fixa); a mira por giroscópio
+(`PS3_PAD_GYRO=<porcentagem>`, desligada por padrão) gira a câmera enquanto
+você segura a mira, o L1 ou o que o mapa liga a ele (`PS3_PAD_GYRO_MODE=always`
+sem segurar). Tudo fica em Controles no launcher. **Feche a Steam antes:**
+com o Steam Input ligado ela toma o DualSense e os gatilhos e a luz ficam
+desligados (a vibração continua); o jogo registra uma linha quando a Steam
+está aberta.
 
 
 | Tecla | PS3 |

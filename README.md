@@ -54,7 +54,7 @@ on the Mac; the launcher and the shared runtime come from the
 | Anisotropic filtering up to 16× | ✅ checked on this game |
 | Internal resolution, MetalFX, FXAA/SMAA, sharpening, colour | 🧪 through the shared runtime and the launcher, options mapped; no visual A/B per combination yet |
 | Controller, keyboard and mouse, rumble | 🧪 adapted in the launcher, bindings tested; not every device combination |
-| DualSense adaptive triggers | 🧪 the bolt trigger clicks, the other resists; unit-tested, not felt on a controller yet |
+| DualSense adaptive triggers, light bar, player lights, gyro aim | 🧪 unit-tested; not tried on a controller yet (quit Steam first) |
 | In-game menu (F1 / Cmd+, / L3+R3) | 🧪 shared runtime, not checked on this game yet |
 | Saves and trophies, saves manager in the app | ✅ local saves `BCUS98119_INFAMOUS_*` recognised, saves from inFAMOUS 2 rejected |
 | The app: play, settings, controls, saves, logs | ✅ macOS bundle built, 72 tests pass, window starts the game |
@@ -201,6 +201,16 @@ it reads as pressed at the click, about half way (`PS3_PAD_FIRE_AT=<10-90>`),
 and buzzes with the motors while you fire. The other trigger, aiming with L1
 bound to it, has a light resistance. Both are set free when the game closes.
 The game logs `adaptive triggers on (fires with the right trigger at 50%)`.
+
+The rest of the DualSense (and a DualShock 4's light bar and gyro): the
+player lights show the port; the light bar is Cole's electric blue
+(`PS3_PAD_LIGHT=<RRGGBB>|off`) and glows red while the game runs the motors
+(`PS3_PAD_LIGHT_HIT=0` keeps it steady); gyro aim (`PS3_PAD_GYRO=<percent>`,
+off by default) turns the camera while you hold aim, L1 or whatever the map
+binds to it (`PS3_PAD_GYRO_MODE=always` without holding). All of it is in the
+launcher's Controls. **Quit Steam first:** with Steam Input on it takes over
+the DualSense and the triggers and the light bar stay off (rumble still
+works); the game logs a line when Steam is running.
 
 
 | Key | PS3 |

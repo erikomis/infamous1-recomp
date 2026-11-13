@@ -66,7 +66,9 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 - [x] Controle, teclado e mouse mapeados pelo runtime compartilhado, bindings testados.
 - [ ] Todas as combinações de dispositivos em janela (DualSense, DualShock 4, Xbox, teclado e mouse).
 - [x] Gatilhos adaptáveis do DualSense (2026-11-13): o gatilho ligado ao raio (R1) tem clique e dispara no clique, o outro tem uma resistência leve, e vibra enquanto dispara; `test_pad_adaptive` no patch do toolkit, uma chave no launcher e no `recomplauncher.json`.
-- [ ] Senti-los num DualSense: no controle atual nenhuma saída chega a ele (nem a luz nem os gatilhos, também nos ports do Resistance), então por enquanto só a linha `adaptive triggers on` no log os confirma.
+- [x] O resto do DualSense (2026-11-13): luzes de jogador, a barra de luz (azul elétrico, vermelha com os golpes), mira por giroscópio segurando a mira (L1), o primeiro efeito limpando os bits de economia de energia que outro programa deixou, uma linha no log quando a Steam está aberta; no `test_pad_adaptive` e em Controles no launcher.
+- [ ] Senti-los num DualSense, com a Steam fechada (o Steam Input reescreve a saída do controle: era por isso que nada chegava a ele também nos ports do Resistance).
+- [ ] A barra de luz seguindo o karma do Cole (azul/vermelho) pela memória do jogo.
 - [ ] O menu no jogo (F1 / Cmd+, / L3+R3) neste jogo.
 
 ### Rebuild

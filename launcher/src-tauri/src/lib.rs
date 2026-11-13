@@ -139,6 +139,16 @@ pub struct Settings {
     /// trigger bound to the bolt, R1, clicks like a gun's and fires at the
     /// click; the other has a light resistance).
     pub adaptive_triggers: bool,
+    /// PS3_PAD_LIGHT: the DualSense / DualShock 4 light bar, "" (the game's
+    /// electric blue, main.cpp), "off", or RRGGBB.
+    pub pad_light: String,
+    /// PS3_PAD_LIGHT_HIT=0 when off: the light bar glows red with the
+    /// game's rumble (hits, explosions).
+    pub pad_light_hit: bool,
+    /// PS3_PAD_GYRO: gyro aim, percent (0 = off), while aiming (L1).
+    pub gyro: u32,
+    /// PS3_PAD_GYRO_MODE=always: gyro aim without holding aim.
+    pub gyro_always: bool,
     /// PS3_BUTTON_ICONS: the glyphs in the game's button prompts: "auto" (the
     /// controller in use), "playstation", "xbox" or "keyboard".
     pub button_icons: String,
@@ -211,6 +221,10 @@ impl Default for Settings {
             rumble: true,
             rumble_strength: 100,
             adaptive_triggers: true,
+            pad_light: String::new(),
+            pad_light_hit: true,
+            gyro: 0,
+            gyro_always: false,
             button_icons: "auto".into(),
             show_fps: false,
             extra_env: String::new(),
@@ -803,6 +817,19 @@ fn launch_env(s: &Settings, inst: &InstallInfo, input: &InputEnv) -> Vec<(String
     }
     if !s.adaptive_triggers {
         set("PS3_PAD_ADAPTIVE", "0".into());
+    }
+    let light = s.pad_light.trim();
+    if light == "off" || (light.len() == 6 && light.chars().all(|c| c.is_ascii_hexdigit())) {
+        set("PS3_PAD_LIGHT", light.to_string());
+    }
+    if !s.pad_light_hit {
+        set("PS3_PAD_LIGHT_HIT", "0".into());
+    }
+    if s.gyro > 0 {
+        set("PS3_PAD_GYRO", s.gyro.min(400).to_string());
+        if s.gyro_always {
+            set("PS3_PAD_GYRO_MODE", "always".into());
+        }
     }
     // Auto is the game's own default: left out, so a choice made in the
     // in-game menu (overlay.ini) is not overridden.
@@ -2812,6 +2839,36 @@ mod tests {
     }
 
     #[test]
+    fn dualsense_light_and_gyro_env() {
+        let inst = InstallInfo {
+            layout: "dev".into(), title: String::new(), app_ver: String::new(), port_dir: "/p".into(),
+            run_sh: "/p/run.sh".into(), executable: "/p/x".into(), vfs: "/v".into(), dev_flash: String::new(),
+            icon: String::new(), background: String::new(), built_at: String::new(), port_commit: String::new(),
+            toolkit_commit: String::new(),
+        };
+        let none = InputEnv::default();
+        let env = |s: &Settings| -> BTreeMap<String, String> { launch_env(s, &inst, &none).into_iter().collect() };
+        let mut st = Settings { pad_light: "1e64ff".into(), pad_light_hit: false, gyro: 150, gyro_always: true, ..Default::default() };
+        let e = env(&st);
+        assert_eq!(e["PS3_PAD_LIGHT"], "1e64ff");
+        assert_eq!(e["PS3_PAD_LIGHT_HIT"], "0");
+        assert_eq!(e["PS3_PAD_GYRO"], "150");
+        assert_eq!(e["PS3_PAD_GYRO_MODE"], "always");
+        st.pad_light = "off".into();
+        st.gyro = 0;
+        let e = env(&st);
+        assert_eq!(e["PS3_PAD_LIGHT"], "off");
+        assert!(!e.contains_key("PS3_PAD_GYRO") && !e.contains_key("PS3_PAD_GYRO_MODE"));
+        st.pad_light = "zz0000".into(); // not a colour: nothing passed, the game's own
+        st.gyro = 900; // capped
+        let e = env(&st);
+        assert!(!e.contains_key("PS3_PAD_LIGHT"));
+        assert_eq!(e["PS3_PAD_GYRO"], "400");
+        let d = env(&Settings::default());
+        assert!(!d.contains_key("PS3_PAD_LIGHT") && !d.contains_key("PS3_PAD_LIGHT_HIT") && !d.contains_key("PS3_PAD_GYRO"));
+    }
+
+    #[test]
     fn env_display_audio_rumble() {
         let inst = InstallInfo {
             layout: "install".into(),
@@ -2832,7 +2889,8 @@ mod tests {
         let mut s = Settings::default();
         let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
         for k in ["PS3_DISPLAY", "PS3_VSYNC", "PS3_AUDIO_VOLUME", "PS3_AUDIO_DEVICE", "PS3_RUMBLE", "PS3_RUMBLE_STRENGTH",
-                  "PS3_BUTTON_ICONS", "PS3_PAD_ADAPTIVE"] {
+                  "PS3_BUTTON_ICONS", "PS3_PAD_ADAPTIVE", "PS3_PAD_LIGHT", "PS3_PAD_LIGHT_HIT", "PS3_PAD_GYRO",
+                  "PS3_PAD_GYRO_MODE"] {
             assert!(!env.contains_key(k), "{k} is a default and must stay out");
         }
         s.display = "DELL U2720Q".into();

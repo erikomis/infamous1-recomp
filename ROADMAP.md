@@ -66,7 +66,9 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 - [x] Controller, keyboard and mouse mapped through the shared runtime, bindings tested.
 - [ ] Every combination of devices in a window (DualSense, DualShock 4, Xbox, keyboard and mouse).
 - [x] DualSense adaptive triggers (2026-11-13): the trigger bound to the bolt (R1) clicks and fires at the click, the other resists lightly, a buzz while firing; `test_pad_adaptive` in the toolkit patch, a switch in the launcher and in `recomplauncher.json`.
-- [ ] Feel them on a DualSense: on the current one no output reaches the controller at all (lightbar or triggers, also in the Resistance ports), so for now only the log line `adaptive triggers on` confirms them.
+- [x] The rest of the DualSense (2026-11-13): player lights, the light bar (electric blue, red with hits), gyro aim while holding aim (L1), the first effect clearing the power-save bits another program left, a log line when Steam is running; in `test_pad_adaptive` and the launcher's Controls.
+- [ ] Feel them on a DualSense, with Steam quit (Steam Input rewrites the controller's output: that was why nothing reached it in the Resistance ports either).
+- [ ] The light bar following Cole's karma (blue/red) from the game's memory.
 - [ ] The in-game menu (F1 / Cmd+, / L3+R3) on this game.
 
 ### Rebuild

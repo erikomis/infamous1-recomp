@@ -157,6 +157,32 @@
       "defaults": { "adaptiveTriggers": "true" }
     },
     {
+      "id": "pad_light",
+      "label": "Light bar",
+      "group": "Sound and controls",
+      "help": "The DualSense / DualShock 4 light bar. It glows red with hits.",
+      "choices": [
+        { "label": "Electric blue", "set": { "padLight": "\"\"" } },
+        { "label": "Red", "set": { "padLight": "\"ff1a00\"" } },
+        { "label": "White", "set": { "padLight": "\"ffffff\"" } },
+        { "label": "Off", "set": { "padLight": "\"off\"" } }
+      ],
+      "defaults": { "padLight": "\"\"" }
+    },
+    {
+      "id": "gyro",
+      "label": "Gyro aim",
+      "group": "Sound and controls",
+      "help": "Turn and tilt the controller to aim while you hold aim (L1). DualSense and DualShock 4.",
+      "choices": [
+        { "label": "Off", "set": { "gyro": "0" } },
+        { "label": "Low", "set": { "gyro": "60" } },
+        { "label": "Medium", "set": { "gyro": "100" } },
+        { "label": "High", "set": { "gyro": "160" } }
+      ],
+      "defaults": { "gyro": "0" }
+    },
+    {
       "id": "button_icons",
       "label": "Button prompts",
       "group": "Sound and controls",
