@@ -48,6 +48,7 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 ### Graphics
 
 - [x] Anisotropic filtering up to 16× (`out/aniso-smoke.log`, `out/aniso16/`).
+- [x] Supersampling (2026-11-13): an internal resolution above the window's pixels is reduced into the window with a Lanczos filter (MetalPerformanceShaders, `PS3_DOWNSCALE=0` off) instead of the layer sampling it; `tools/test_metal_downscale.py` (a 1-pixel checkerboard reduced 3x comes out an even grey). Not yet compared by eye in a window.
 - [ ] A/B captures of the image levers (FXAA/SMAA, `PS3_RES_SCALE`, MetalFX, sharpening) on the same scene, with `tools/capture.sh`.
 - [ ] Check the rendering on later scenes (lighting, shadows, water, particles) in a window; the inFAMOUS 2 fixes were found that way.
 

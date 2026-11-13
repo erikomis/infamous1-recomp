@@ -48,6 +48,7 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 ### Gráficos
 
 - [x] Filtragem anisotrópica até 16× (`out/aniso-smoke.log`, `out/aniso16/`).
+- [x] Supersampling (2026-11-13): uma resolução interna acima dos pixels da janela é reduzida para a janela com um filtro Lanczos (MetalPerformanceShaders, `PS3_DOWNSCALE=0` desliga) em vez de a camada amostrá-la; `tools/test_metal_downscale.py` (um xadrez de 1 pixel reduzido 3x sai num cinza uniforme). Ainda não comparado a olho numa janela.
 - [ ] Capturas A/B das alavancas de imagem (FXAA/SMAA, `PS3_RES_SCALE`, MetalFX, nitidez) na mesma cena, com o `tools/capture.sh`.
 - [ ] Verificar a renderização em cenas mais adiante (iluminação, sombras, água, partículas) em janela; as correções do inFAMOUS 2 foram achadas assim.
 

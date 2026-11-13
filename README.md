@@ -233,7 +233,7 @@ Useful variables, shared with the other ports of this toolkit:
 | --- | --- |
 | `PS3_ANISO=2\|4\|8\|16` | anisotropic filtering (only mipmapped textures). Default off |
 | `PS3_AA=fxaa` / `smaa` | anti-aliasing on the 1280×720 image |
-| `PS3_RES_SCALE=1.5\|2\|3` | internal resolution (1080p / 1440p / 4K) |
+| `PS3_RES_SCALE=1.5\|2\|3` | internal resolution (1080p / 1440p / 4K): every colour and depth target, shadows and reflections included. Above the window's pixels it is supersampled: each frame is reduced into the window with a Lanczos filter, every pixel counted (`PS3_DOWNSCALE=0`: the old shrink) |
 | `PS3_UPSCALE=metalfx` | MetalFX spatial upscaling to the window |
 | `PS3_SHARPEN=<0..1>` | contrast-adaptive sharpening |
 | `PS3_WINDOW_MODE=windowed\|fullscreen\|borderless` | how the game opens |
