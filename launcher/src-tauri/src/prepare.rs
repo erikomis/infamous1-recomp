@@ -989,7 +989,14 @@ mod tests {
         // the file RecompLauncher edits is launcher.json in the data folder
         let file = profile["config"][0]["file"][0]["path"].as_str().unwrap();
         assert_eq!(file, "{home}/Library/Application Support/infamous1-recomp/launcher.json");
-        assert!(settings_path().ends_with("Library/Application Support/infamous1-recomp/launcher.json"));
+        // the same file the launcher keeps its settings in (macOS: the
+        // profile is a Mac one; elsewhere data_root is ~/.local/share or
+        // %LOCALAPPDATA%)
+        if cfg!(target_os = "macos") {
+            assert!(settings_path().ends_with("Library/Application Support/infamous1-recomp/launcher.json"));
+        } else {
+            assert!(settings_path().ends_with("infamous1-recomp/launcher.json"));
+        }
         for s in profile["settings"].as_array().unwrap() {
             let id = s["id"].as_str().unwrap();
             for (k, v) in s["defaults"].as_object().unwrap() {
