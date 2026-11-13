@@ -39,8 +39,9 @@ lado do `.app`:
 
 - **A cópia** (`game`): o inFAMOUS da PlayStation Store do próprio jogador
   (NPUA80480), a pasta `dev_hdd0/game/NPUA80480` que o RPCS3 instalou, ou a
-  pasta de dados do RPCS3 acima dela, com a licença (`.rap`) no `exdata`. O
-  disco (BCUS98119) é recusado com uma mensagem própria.
+  pasta de dados do RPCS3 acima dela (o perfil a reconhece pelo TITLE_ID,
+  `ids`), com a licença (`.rap`) no `exdata` ou ao lado da pasta. O disco
+  (BCUS98119) é recusado com uma mensagem própria.
 - **Preparação** (`prepare`): `infamous1-recomp.app/Contents/MacOS/infamous1-launcher
   --prepare --game <cópia>`, com limite de 2 horas. Roda sem janela e faz o
   que a tela Instalar faz: confere a cópia (só leitura: `PARAM.SFO` com
@@ -66,8 +67,9 @@ lado do `.app`:
   janela e joga quando ela está pronta, como antes; ali o `--game` é guardado
   antes (um errado é informado e o jogo não começa).
 - **Configurações** (`config`, `settings`): modo e tamanho da janela, V-Sync,
-  resolução, upscaling, anti-aliasing, filtro de textura, nitidez, volume,
-  vibração, ícones dos botões e Mostrar FPS, gravados no `launcher.json` (as
+  resolução, upscaling, anti-aliasing, filtro de textura, nitidez, idioma,
+  ícones dos botões, volume, vibração, gatilhos adaptáveis, barra de luz, mira
+  por giroscópio e Mostrar FPS, nos mesmos grupos do port do inFAMOUS 2, gravados no `launcher.json` (as
   mesmas chaves e valores da janela; um teste confere que cada um volta igual
   ao ser lido).
 - **Saves e logs**: `<data>/gamedata/dev_hdd0/home/00000001/savedata` e o
@@ -80,13 +82,14 @@ palavra por palavra, o que um teste confere):
 | Código | Significado |
 |---|---|
 | 0 | prepare: o jogo está compilado; jogar: saiu normalmente (`"ok"`) |
-| 40 | sem cópia, não encontrada, não é NPUA80480, incompleta, ou sem licença (`.rap`) |
+| 40 | sem cópia, não encontrada, não é NPUA80480, ou incompleta |
 | 41 | o jogador precisa fazer algo antes: Command Line Tools (o instalador abre), ferramentas de build, RPCS3 ou o firmware, ou não é um Mac |
 | 42 | um download do build falhou (o toolkit, os pacotes Python: a conexão) |
 | 43 | um passo do rebuild falhou (`install.log`), ou falta espaço |
 | 44 | outro prepare, um rebuild aberto pela janela, ou o jogo deste port já está rodando |
 | 45 | jogar: o jogo ainda não está compilado |
 | 46 | o launcher falhou sozinho (as configurações dele, iniciar um programa) |
+| 47 | a cópia está certa, mas a licença (`.rap`) não foi encontrada (no `exdata` do RPCS3 nem ao lado da pasta do jogo) |
 
 "Já rodando" é só este jogo: um processo cujo programa é o executável em
 `infamous1-lle/build/` (o do bundle ou o simples), não o nome sozinho (os

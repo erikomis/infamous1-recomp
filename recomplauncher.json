@@ -7,9 +7,10 @@
   "min": "0.90.0-beta.27",
   "game": {
     "kind": "folder",
-    "label": "Your own inFAMOUS from the PlayStation Store, NPUA80480 version 01.00, as RPCS3 installed it: its dev_hdd0/game/NPUA80480 folder (or RPCS3's data folder), with its licence (.rap) in RPCS3's exdata. RPCS3 and the PS3 firmware are needed too: they decrypt your copy. The disc release (BCUS98119) doesn't work yet.",
+    "label": "Your own inFAMOUS from the PlayStation Store (NPUA80480, version 01.00) as RPCS3 installed it: the NPUA80480 folder in RPCS3's dev_hdd0/game. The licence (.rap) is found in RPCS3 on its own. RPCS3 and the PS3 firmware are needed too: they decrypt your copy. The disc release (BCUS98119) doesn't work yet.",
     "check": {
-      "file": "PARAM.SFO"
+      "file": "PARAM.SFO",
+      "ids": ["NPUA80480"]
     }
   },
   "start": {
@@ -29,7 +30,7 @@
       "file": [{ "path": "{home}/Library/Application Support/infamous1-recomp/launcher.json" }]
     }
   ],
-  "groups": [{ "id": "Display" }, { "id": "Picture" }, { "id": "Sound and controls" }],
+  "groups": [{ "id": "Display" }, { "id": "Picture" }, { "id": "Game and sound" }],
   "settings": [
     {
       "id": "window_mode",
@@ -127,9 +128,35 @@
       "defaults": { "sharpen": "0.0" }
     },
     {
+      "id": "game_lang",
+      "label": "Language",
+      "group": "Game and sound",
+      "help": "The dub, the subtitles and the menus.",
+      "choices": [
+        { "label": "Português (Brasil)", "set": { "gameLang": "\"pt\"" } },
+        { "label": "English", "set": { "gameLang": "\"en\"" } },
+        { "label": "Español", "set": { "gameLang": "\"es\"" } },
+        { "label": "Français", "set": { "gameLang": "\"fr\"" } }
+      ],
+      "defaults": { "gameLang": "\"pt\"" }
+    },
+    {
+      "id": "button_icons",
+      "label": "Button prompts",
+      "group": "Game and sound",
+      "help": "The buttons the game shows. Automatic follows the controller in use.",
+      "choices": [
+        { "label": "Automatic", "set": { "buttonIcons": "\"auto\"" } },
+        { "label": "PlayStation", "set": { "buttonIcons": "\"playstation\"" } },
+        { "label": "Xbox", "set": { "buttonIcons": "\"xbox\"" } },
+        { "label": "Keyboard", "set": { "buttonIcons": "\"keyboard\"" } }
+      ],
+      "defaults": { "buttonIcons": "\"auto\"" }
+    },
+    {
       "id": "volume",
       "label": "Volume",
-      "group": "Sound and controls",
+      "group": "Game and sound",
       "help": "The game's sound, in percent.",
       "slider": { "key": "audioVolume", "min": 0, "max": 100, "step": 5, "format": "%d" },
       "defaults": { "audioVolume": "100" }
@@ -137,7 +164,7 @@
     {
       "id": "rumble",
       "label": "Vibration",
-      "group": "Sound and controls",
+      "group": "Game and sound",
       "help": "The controller's rumble.",
       "choices": [
         { "label": "On", "set": { "rumble": "true" } },
@@ -148,7 +175,7 @@
     {
       "id": "adaptive_triggers",
       "label": "Adaptive triggers",
-      "group": "Sound and controls",
+      "group": "Game and sound",
       "help": "DualSense only: the trigger you fire bolts with clicks like a gun's and buzzes while you fire; the other has a light resistance.",
       "choices": [
         { "label": "On", "set": { "adaptiveTriggers": "true" } },
@@ -159,7 +186,7 @@
     {
       "id": "pad_light",
       "label": "Light bar",
-      "group": "Sound and controls",
+      "group": "Game and sound",
       "help": "The DualSense / DualShock 4 light bar. It glows red with hits.",
       "choices": [
         { "label": "Electric blue", "set": { "padLight": "\"\"" } },
@@ -172,7 +199,7 @@
     {
       "id": "gyro",
       "label": "Gyro aim",
-      "group": "Sound and controls",
+      "group": "Game and sound",
       "help": "Turn and tilt the controller to aim while you hold aim (L1). DualSense and DualShock 4.",
       "choices": [
         { "label": "Off", "set": { "gyro": "0" } },
@@ -183,22 +210,9 @@
       "defaults": { "gyro": "0" }
     },
     {
-      "id": "button_icons",
-      "label": "Button prompts",
-      "group": "Sound and controls",
-      "help": "The buttons the game shows. Automatic follows the controller in use.",
-      "choices": [
-        { "label": "Automatic", "set": { "buttonIcons": "\"auto\"" } },
-        { "label": "PlayStation", "set": { "buttonIcons": "\"playstation\"" } },
-        { "label": "Xbox", "set": { "buttonIcons": "\"xbox\"" } },
-        { "label": "Keyboard", "set": { "buttonIcons": "\"keyboard\"" } }
-      ],
-      "defaults": { "buttonIcons": "\"auto\"" }
-    },
-    {
       "id": "show_fps",
       "label": "Show FPS",
-      "group": "Sound and controls",
+      "group": "Game and sound",
       "help": "The frame rate in the window's title.",
       "choices": [
         { "label": "Off", "set": { "showFps": "false" } },
@@ -223,12 +237,13 @@
   ],
   "exit_codes": {
     "0": "ok",
-    "40": "Your copy isn't one this port reads: it needs your own inFAMOUS from the PlayStation Store (NPUA80480) as RPCS3 installed it, the dev_hdd0/game/NPUA80480 folder, with its licence (.rap) in RPCS3's exdata folder. The disc release (BCUS98119) doesn't work yet. Pick it again on the game's page.",
+    "40": "Your copy isn't one this port reads: it needs your own inFAMOUS from the PlayStation Store (NPUA80480) as RPCS3 installed it, the NPUA80480 folder in RPCS3's dev_hdd0/game. The disc release (BCUS98119) doesn't work yet. Pick it again on the game's page.",
     "41": "Your Mac needs something first: Apple's Command Line Tools (their installer opened: finish it), the build tools (CMake and Python 3.10 or newer: the inFAMOUS launcher installs them with Homebrew), or RPCS3 with the PS3 firmware, which decrypts your copy. The setup's last lines say which. Then set the game up again.",
     "42": "Couldn't download what the build needs (the ps3recomp toolkit or its Python packages). Check the internet connection and set the game up again.",
     "43": "Building the game failed. Check there are about 5 GB free, then set it up again: it continues where it stopped. install.log in the logs folder says why.",
     "44": "inFAMOUS is already running, or another setup of it is. Close it or wait for it, then try again.",
     "45": "The game isn't built yet. Set it up again on the game's page (the first time takes about 10 minutes).",
-    "46": "The inFAMOUS launcher couldn't start it. Open the launcher itself to see why."
+    "46": "The inFAMOUS launcher couldn't start it. Open the launcher itself to see why.",
+    "47": "Your licence for the game (its .rap file) wasn't found. RPCS3 keeps it in dev_hdd0/home/<user>/exdata once the game is installed there; or put the .rap next to the game's folder. Then set the game up again."
   }
 }

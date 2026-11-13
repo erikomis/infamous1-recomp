@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 pub enum Exit {
     /// Prepare: the game is built. Play: the game was quit normally.
     Ok,
-    /// No copy given, not NPUA80480, incomplete, or no licence (.rap) found.
+    /// No copy given, not NPUA80480, or incomplete.
     Copy,
     /// Something the player has to do first: Apple's Command Line Tools
     /// (their installer is opened), the build tools, RPCS3 or the firmware,
@@ -50,11 +50,13 @@ pub enum Exit {
     NotBuilt,
     /// The launcher failed on its own (its settings, starting a program).
     Failed,
+    /// The copy is good but its licence (.rap) was not found.
+    Licence,
 }
 
 impl Exit {
     #[cfg(test)]
-    pub const ALL: [Exit; 8] = [Exit::Ok, Exit::Copy, Exit::NeedsPlayer, Exit::Sources, Exit::Build, Exit::Running, Exit::NotBuilt, Exit::Failed];
+    pub const ALL: [Exit; 9] = [Exit::Ok, Exit::Copy, Exit::NeedsPlayer, Exit::Sources, Exit::Build, Exit::Running, Exit::NotBuilt, Exit::Failed, Exit::Licence];
 
     pub fn code(self) -> i32 {
         match self {
@@ -66,6 +68,7 @@ impl Exit {
             Exit::Running => 44,
             Exit::NotBuilt => 45,
             Exit::Failed => 46,
+            Exit::Licence => 47,
         }
     }
 
@@ -74,13 +77,14 @@ impl Exit {
     pub fn says(self) -> &'static str {
         match self {
             Exit::Ok => "ok",
-            Exit::Copy => "Your copy isn't one this port reads: it needs your own inFAMOUS from the PlayStation Store (NPUA80480) as RPCS3 installed it, the dev_hdd0/game/NPUA80480 folder, with its licence (.rap) in RPCS3's exdata folder. The disc release (BCUS98119) doesn't work yet. Pick it again on the game's page.",
+            Exit::Copy => "Your copy isn't one this port reads: it needs your own inFAMOUS from the PlayStation Store (NPUA80480) as RPCS3 installed it, the NPUA80480 folder in RPCS3's dev_hdd0/game. The disc release (BCUS98119) doesn't work yet. Pick it again on the game's page.",
             Exit::NeedsPlayer => "Your Mac needs something first: Apple's Command Line Tools (their installer opened: finish it), the build tools (CMake and Python 3.10 or newer: the inFAMOUS launcher installs them with Homebrew), or RPCS3 with the PS3 firmware, which decrypts your copy. The setup's last lines say which. Then set the game up again.",
             Exit::Sources => "Couldn't download what the build needs (the ps3recomp toolkit or its Python packages). Check the internet connection and set the game up again.",
             Exit::Build => "Building the game failed. Check there are about 5 GB free, then set it up again: it continues where it stopped. install.log in the logs folder says why.",
             Exit::Running => "inFAMOUS is already running, or another setup of it is. Close it or wait for it, then try again.",
             Exit::NotBuilt => "The game isn't built yet. Set it up again on the game's page (the first time takes about 10 minutes).",
             Exit::Failed => "The inFAMOUS launcher couldn't start it. Open the launcher itself to see why.",
+            Exit::Licence => "Your licence for the game (its .rap file) wasn't found. RPCS3 keeps it in dev_hdd0/home/<user>/exdata once the game is installed there; or put the .rap next to the game's folder. Then set the game up again.",
         }
     }
 }
@@ -512,8 +516,10 @@ pub fn overall(rebuild_fraction: f64) -> f64 {
 pub fn classify(code: i32, failed_checks: &[String], tail: &[String]) -> Exit {
     let failed = |names: &[&str]| failed_checks.iter().any(|c| names.contains(&c.as_str()));
     if code == 2 || (code != 1 && !failed_checks.is_empty()) {
-        return if failed(&["game", "rap"]) {
+        return if failed(&["game"]) {
             Exit::Copy
+        } else if failed(&["rap"]) {
+            Exit::Licence
         } else if failed(&["disk"]) {
             Exit::Build
         } else if failed(&["patch", "out", "toolkit"]) {
@@ -689,8 +695,8 @@ pub fn run_prepare(game: Option<&Path>) -> Exit {
         }
     };
     let Some(rap) = find_rap(&copy, &s) else {
-        rep.fail("Your copy's licence (.rap) wasn't found: RPCS3 keeps it in dev_hdd0/home/<user>/exdata. Install the game's PlayStation Store package in RPCS3 with its licence, then pick the game folder again.");
-        return Exit::Copy;
+        rep.fail("Your copy's licence (.rap) wasn't found: RPCS3 keeps it in dev_hdd0/home/<user>/exdata. Install the game's PlayStation Store package in RPCS3 with its licence, or put the .rap next to the game's folder, then set the game up again.");
+        return Exit::Licence;
     };
     say(&format!("Its licence: {}", rap.display()));
 
@@ -960,7 +966,7 @@ mod tests {
     fn failures_are_told_apart() {
         let v = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         // exit 2: a prerequisite, by the checks that failed
-        assert_eq!(classify(2, &v(&["rap"]), &[]), Exit::Copy);
+        assert_eq!(classify(2, &v(&["rap"]), &[]), Exit::Licence);
         assert_eq!(classify(2, &v(&["firmware", "game"]), &[]), Exit::Copy);
         assert_eq!(classify(2, &v(&["firmware"]), &[]), Exit::NeedsPlayer);
         assert_eq!(classify(2, &v(&["rpcs3", "cmake"]), &[]), Exit::NeedsPlayer);
