@@ -16747,7 +16747,7 @@ index aee795c9..5845a3fa 100644
  
  /* The clear colour most recently set via NV4097_SET_COLOR_CLEAR_VALUE, in the
 diff --git a/libs/video/rsx_metal_backend.m b/libs/video/rsx_metal_backend.m
-index 98db2857..76969c63 100644
+index 98db2857..b766fc99 100644
 --- a/libs/video/rsx_metal_backend.m
 +++ b/libs/video/rsx_metal_backend.m
 @@ -48,11 +48,39 @@
@@ -20193,7 +20193,7 @@ index 98db2857..76969c63 100644
          /* A pipeline always declares the depth attachment, so a draw pass
           * always has to have one; the display's shared buffer is the fallback
           * for a guest that never declared a zeta. */
-@@ -3359,33 +5902,315 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3359,33 +5902,318 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * skips those draws rather than encoding a mismatch. */
          if (!enc || attach != nrt) {
              if (enc) [enc endEncoding];
@@ -20454,6 +20454,9 @@ index 98db2857..76969c63 100644
 +    if (!s_gfx_ds_kernel) {
 +        s_gfx_ds_kernel = [[lanczos alloc] initWithDevice:s_dev];
 +        if (!s_gfx_ds_kernel) { gfx_downscale_fail("not supported on this GPU"); return nil; }
++        /* The default edge mode (zero) reads black past the picture's edge
++         * and darkens its outer row and column; clamp reads the edge. */
++        ((MPSImageLanczosScale*)s_gfx_ds_kernel).edgeMode = MPSImageEdgeModeClamp;
 +    }
 +    if (!([src usage] & MTLTextureUsageShaderRead)) {
 +        gfx_downscale_fail("the display buffer cannot be read by a shader");
@@ -20518,16 +20521,17 @@ index 98db2857..76969c63 100644
          pd.colorAttachments[0].pixelFormat = [dst pixelFormat];
          NSError* err = nil;
          s_eng_blit_pso = [s_dev newRenderPipelineStateWithDescriptor:pd error:&err];
-@@ -3404,9 +6229,31 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
+@@ -3404,9 +6232,32 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
      if (!e) return;
      [e setRenderPipelineState:s_eng_blit_pso];
      [e setFragmentTexture:src atIndex:0];
 -    [e setFragmentSamplerState:s_eng_point_sampler atIndex:0];
-+    /* Point sampling whenever nothing scales (and without PS3_UPSCALE, as it
-+     * always was); bilinear when the upscale option has the drawable larger
-+     * and MetalFX did not fill it. */
-+    const int lin = s_gfx_upscale &&
-+                    ([src width] != [dst width] || [src height] != [dst height]);
++    /* Point sampling whenever nothing scales (and without PS3_UPSCALE or
++     * PS3_DOWNSCALE, as it always was); bilinear when the upscale option has
++     * the drawable larger and MetalFX did not fill it, or a larger picture is
++     * left to this pass because the Lanczos reduction gave up. */
++    const int lin = ([src width] != [dst width] || [src height] != [dst height]) &&
++                    (s_gfx_upscale || ([dst width] < [src width] && [dst height] < [src height]));
 +    [e setFragmentSamplerState:lin ? s_eng_linear_sampler : s_eng_point_sampler atIndex:0];
 +    /* The video out's gamma (cellVideoOutSetGamma, the title's brightness
 +     * setting): out = in^gamma, as RPCS3's calibration pass applies it. */
@@ -20551,7 +20555,7 @@ index 98db2857..76969c63 100644
  }
  
  /* Encode everything recorded so far and commit it.
-@@ -3437,50 +6284,88 @@ static void eng_pt_report(void)
+@@ -3437,50 +6288,88 @@ static void eng_pt_report(void)
      if (!t0) t0 = now;
      if (now - t0 < 10000000000ull) return;
      fprintf(stderr, "[rsx present] %u presents: in-flight wait %.0f ms, nextDrawable %.0f ms,"
@@ -20657,7 +20661,7 @@ index 98db2857..76969c63 100644
                      fprintf(stderr, "[pass] %5u x%-4u kind=%d rt=", i, j - i, (int)r->kind);
                      for (u32 k = 0; k < r->nrt; k++) fprintf(stderr, "%s%u", k ? "," : "", r->rt[k]);
                      fprintf(stderr, " depth=%u", r->depth);
-@@ -3498,19 +6383,51 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3498,19 +6387,51 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
                      i = j;
                  }
              }
@@ -20713,7 +20717,7 @@ index 98db2857..76969c63 100644
                  if (busy) __atomic_store_n(busy, 0, __ATOMIC_RELEASE);
                  dispatch_semaphore_signal(sem);
              }];
-@@ -3518,39 +6435,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3518,39 +6439,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
              s_pt_ns[3] += eng_pt_now() - pt;
              s_pt_n++;
              eng_pt_report();
@@ -20892,7 +20896,7 @@ index 98db2857..76969c63 100644
          id<MTLCommandBuffer> fence = [s_queue commandBuffer];
          [fence commit];
          [fence waitUntilCompleted];
-@@ -3580,7 +6624,11 @@ static void eng_dump_frame(id<MTLTexture> src)
+@@ -3580,7 +6628,11 @@ static void eng_dump_frame(id<MTLTexture> src)
              fwrite(rgb, 1, 3, f);
          }
          fclose(f);
@@ -20905,7 +20909,7 @@ index 98db2857..76969c63 100644
      }
      free(rgba);
  }
-@@ -3596,14 +6644,31 @@ static float eng_half_to_float(uint16_t h)
+@@ -3596,14 +6648,31 @@ static float eng_half_to_float(uint16_t h)
      else f = (s << 31) | ((e + 112) << 23) | (m << 13);
      float r; memcpy(&r, &f, 4); return r;
  }
@@ -20939,7 +20943,7 @@ index 98db2857..76969c63 100644
      for (u32 h = 1; h <= s_eng_obj_count; ++h) {
          id<MTLTexture> t = s_eng_obj[h - 1];
          /* PS3RECOMP_METAL_SURF_DUMP_EXTRA=h,h,...: also dump these handles even if
-@@ -3659,6 +6724,26 @@ static void eng_dump_surfaces(void)
+@@ -3659,6 +6728,26 @@ static void eng_dump_surfaces(void)
              }
              fclose(f);
          }
@@ -20966,7 +20970,7 @@ index 98db2857..76969c63 100644
          free(px);
      }
      fprintf(stderr, "[rsx engine/metal] dumped render targets for frame %u to %s\n", frame, dir);
-@@ -3671,17 +6756,67 @@ static void eng_present(void* user, u32 surface)
+@@ -3671,17 +6760,67 @@ static void eng_present(void* user, u32 surface)
      if (!src) { eng_encode_and_commit(nil); return; }
      const u32 nrec = s_eng_rec_count;
      eng_encode_and_commit(src);
@@ -21036,7 +21040,7 @@ index 98db2857..76969c63 100644
      if ([t storageMode] != MTLStorageModePrivate) {
          [t getBytes:out bytesPerRow:out_pitch
           fromRegion:MTLRegionMake2D(x, y, w, h) mipmapLevel:0];
-@@ -3705,14 +6840,101 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3705,14 +6844,101 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
          memcpy((u8*)out + (size_t)row * out_pitch, src + (size_t)row * w * bpp, (size_t)w * bpp);
  }
  
@@ -21138,7 +21142,7 @@ index 98db2857..76969c63 100644
      .color_target_create  = eng_color_target_create,
      .color_target_release = eng_obj_release,
      .surface_view         = eng_surface_view,
-@@ -3721,6 +6943,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3721,6 +6947,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .depth_snapshot       = eng_depth_snapshot,
      .color_snapshot       = eng_color_snapshot,
      .depth_snapshot_rgba8 = eng_depth_snapshot_rgba8,
@@ -21147,7 +21151,7 @@ index 98db2857..76969c63 100644
      .pipeline_create      = eng_pipeline_create,
      .pipeline_release     = eng_pipeline_release,
      .bind_targets         = eng_bind_targets,
-@@ -3733,7 +6957,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3733,7 +6961,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .set_viewport         = eng_set_viewport,
      .set_scissor          = eng_set_scissor,
      .set_stencil_ref      = eng_set_stencil_ref,
@@ -21162,7 +21166,7 @@ index 98db2857..76969c63 100644
      .clear_color          = eng_clear_color,
      .clear_depth_stencil  = eng_clear_depth_stencil,
      .present              = eng_present,
-@@ -3750,12 +6981,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3750,12 +6985,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  
          const char* hl = getenv("PS3RECOMP_METAL_HEADLESS");
          s_headless = (hl && *hl && *hl != '0');
@@ -21180,7 +21184,7 @@ index 98db2857..76969c63 100644
          s_queue = [s_dev newCommandQueue];
          if (!s_queue) {
              fprintf(stderr, "[RSX metal] could not create command queue\n");
-@@ -3822,9 +7058,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3822,9 +7062,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
          if (rsx_draw_engine_enabled() &&
              rsx_draw_engine_init(s_width, s_height) == 0) {
              s_eng_active = 1;
@@ -21203,7 +21207,7 @@ index 98db2857..76969c63 100644
          fprintf(stderr, "[RSX metal] %s on %s (%ux%u), guest shaders %s, %s path\n",
                  s_headless ? "headless" : "windowed",
                  [[s_dev name] UTF8String], s_width, s_height,
-@@ -3837,6 +7086,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3837,6 +7090,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  void rsx_metal_backend_shutdown(void)
  {
      @autoreleasepool {
@@ -21211,7 +21215,7 @@ index 98db2857..76969c63 100644
          if (s_ready) rsx_set_backend(NULL);
          if (s_eng_active) rsx_draw_engine_shutdown();
          rsx_draw_engine_set_backend(NULL);
-@@ -3853,6 +7103,12 @@ void rsx_metal_backend_shutdown(void)
+@@ -3853,6 +7107,12 @@ void rsx_metal_backend_shutdown(void)
              s_inflight = nil;
          }
  #if !TARGET_OS_IPHONE
@@ -21224,7 +21228,7 @@ index 98db2857..76969c63 100644
          if (s_window) { [s_window close]; s_window = nil; }
  #endif
          free(s_verts); s_verts = NULL;
-@@ -3886,25 +7142,180 @@ static int pump_messages_impl(void)
+@@ -3886,25 +7146,180 @@ static int pump_messages_impl(void)
                                                  inMode:NSDefaultRunLoopMode
                                                 dequeue:YES];
              if (!ev) break;
@@ -21409,7 +21413,7 @@ index 98db2857..76969c63 100644
      }
  #endif
      return s_closed ? -1 : 0;
-@@ -4010,8 +7421,9 @@ void rsx_metal_backend_present(void)
+@@ -4010,8 +7425,9 @@ void rsx_metal_backend_present(void)
              encode_draw(enc, &rec->u.draw, &ps);
          }
          if (enc) [enc endEncoding];
@@ -21420,7 +21424,7 @@ index 98db2857..76969c63 100644
  
          if (s_headless) {
              /* The readback below must see a completed frame. */
-@@ -4068,3 +7480,121 @@ u32 rsx_metal_backend_guest_draws(void)
+@@ -4068,3 +7484,121 @@ u32 rsx_metal_backend_guest_draws(void)
  {
      return s_eng_active ? rsx_draw_engine_guest_draws() : s_last_guest_draws;
  }
@@ -22493,10 +22497,10 @@ index 00000000..49380567
 +}
 diff --git a/libs/video/tests/test_metal_downscale.m b/libs/video/tests/test_metal_downscale.m
 new file mode 100644
-index 00000000..f7aa5eb9
+index 00000000..9c87c5b9
 --- /dev/null
 +++ b/libs/video/tests/test_metal_downscale.m
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,121 @@
 +/* The present's supersampling path (PS3_DOWNSCALE, rsx_metal_backend.m) on a
 + * real Metal device, with no window: a display buffer three times the
 + * drawable's size reduced through gfx_lanczos(). A one-pixel checkerboard --
@@ -22576,6 +22580,31 @@ index 00000000..f7aa5eb9
 +        free(px);
 +        printf("test_metal_downscale: checkerboard 192x108 -> 64x36 gives %d..%d\n", lo, hi);
 +        assert(lo > 80 && hi < 175);            /* grey, not black or white pixels */
++
++        /* A solid white picture stays white to its last row and column:
++         * the kernel's taps past the edge read the edge (clamp), not black. */
++        {
++            id<MTLTexture> white = checker(192, 108, MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget);
++            uint8_t* wp = malloc(192 * 108 * 4);
++            memset(wp, 255, 192 * 108 * 4);
++            [white replaceRegion:MTLRegionMake2D(0, 0, 192, 108) mipmapLevel:0 withBytes:wp bytesPerRow:192 * 4];
++            free(wp);
++            id<MTLCommandBuffer> wcb = [s_queue commandBuffer];
++            id<MTLTexture> wout = gfx_lanczos(wcb, white, 64, 36);
++            assert(wout);
++            id<MTLTexture> wback = checker(64, 36, MTLTextureUsageShaderRead);
++            id<MTLBlitCommandEncoder> wb = [wcb blitCommandEncoder];
++            [wb copyFromTexture:wout toTexture:wback];
++            [wb endEncoding];
++            [wcb commit]; [wcb waitUntilCompleted];
++            uint8_t* q = malloc(64 * 36 * 4);
++            [wback getBytes:q bytesPerRow:64 * 4 fromRegion:MTLRegionMake2D(0, 0, 64, 36) mipmapLevel:0];
++            int wlo = 255;
++            for (int i = 0; i < 64 * 36 * 4; i++) if (q[i] < wlo) wlo = q[i];
++            free(q);
++            printf("test_metal_downscale: solid white 192x108 -> 64x36, lowest %d\n", wlo);
++            assert(wlo >= 254);                 /* edges included */
++        }
 +
 +        /* the same sizes reuse the output */
 +        cb = [s_queue commandBuffer];
