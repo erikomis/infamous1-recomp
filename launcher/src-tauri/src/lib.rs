@@ -139,6 +139,9 @@ pub struct Settings {
     /// trigger bound to the bolt, R1, clicks like a gun's and fires at the
     /// click; the other has a light resistance).
     pub adaptive_triggers: bool,
+    /// PS3_HEARTBEAT=0 when off: the controller beats like a heart while
+    /// Cole is badly hurt (the port's heartbeat.c). On by default.
+    pub heartbeat: bool,
     /// PS3_PAD_LIGHT: the DualSense / DualShock 4 light bar, "" (the game's
     /// electric blue, main.cpp), "off", or RRGGBB.
     pub pad_light: String,
@@ -221,6 +224,7 @@ impl Default for Settings {
             rumble: true,
             rumble_strength: 100,
             adaptive_triggers: true,
+            heartbeat: true,
             pad_light: String::new(),
             pad_light_hit: true,
             gyro: 0,
@@ -817,6 +821,11 @@ fn launch_env(s: &Settings, inst: &InstallInfo, input: &InputEnv) -> Vec<(String
     }
     if !s.adaptive_triggers {
         set("PS3_PAD_ADAPTIVE", "0".into());
+    }
+    // The low-health heartbeat is the port's default; with vibration off it
+    // is silent anyway (PS3_RUMBLE=0), so only its own switch is passed.
+    if !s.heartbeat {
+        set("PS3_HEARTBEAT", "0".into());
     }
     let light = s.pad_light.trim();
     if light == "off" || (light.len() == 6 && light.chars().all(|c| c.is_ascii_hexdigit())) {
@@ -2890,7 +2899,7 @@ mod tests {
         let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
         for k in ["PS3_DISPLAY", "PS3_VSYNC", "PS3_AUDIO_VOLUME", "PS3_AUDIO_DEVICE", "PS3_RUMBLE", "PS3_RUMBLE_STRENGTH",
                   "PS3_BUTTON_ICONS", "PS3_PAD_ADAPTIVE", "PS3_PAD_LIGHT", "PS3_PAD_LIGHT_HIT", "PS3_PAD_GYRO",
-                  "PS3_PAD_GYRO_MODE"] {
+                  "PS3_PAD_GYRO_MODE", "PS3_HEARTBEAT"] {
             assert!(!env.contains_key(k), "{k} is a default and must stay out");
         }
         s.display = "DELL U2720Q".into();
@@ -2907,6 +2916,11 @@ mod tests {
         assert_eq!(env.get("PS3_AUDIO_DEVICE").map(String::as_str), Some("Erik's AirPods"));
         assert_eq!(env.get("PS3_RUMBLE_STRENGTH").map(String::as_str), Some("150"));
         assert!(!env.contains_key("PS3_RUMBLE"));
+        s.heartbeat = false;
+        let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
+        assert_eq!(env.get("PS3_HEARTBEAT").map(String::as_str), Some("0"));
+        assert_eq!(env.get("PS3_RUMBLE_STRENGTH").map(String::as_str), Some("150")); // the rumble itself stays
+        s.heartbeat = true;
         s.rumble = false;
         s.adaptive_triggers = false;
         s.audio_volume = 0;

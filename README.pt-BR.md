@@ -218,6 +218,15 @@ com o Steam Input ligado ela toma o DualSense e os gatilhos e a luz ficam
 desligados (a vibração continua); o jogo registra uma linha quando a Steam
 está aberta.
 
+**Batimento com pouca vida** (qualquer controle com vibração): abaixo de 35%
+da vida do Cole o controle pulsa como um coração, de 70 a 140 batidas por
+minuto conforme a vida acaba, e a barra de luz pulsa em vermelho junto; para
+quando ele se recupera ou morre, e em menus e telas de carregamento
+(`PS3_HEARTBEAT=0` ou a chave no launcher desliga, `PS3_HEARTBEAT_AT=<5-90>`
+muda o limite). A imagem do próprio jogo fica em preto e branco mais ou menos
+no mesmo ponto. Como a vida do Cole foi achada:
+[`infamous1-lle/notes/health/`](infamous1-lle/notes/health/README.md).
+
 
 | Tecla | PS3 |
 | --- | --- |

@@ -70,7 +70,9 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 - [x] DualSense adaptive triggers (2026-11-13): the trigger bound to the bolt (R1) clicks and fires at the click, the other resists lightly, a buzz while firing; `test_pad_adaptive` in the toolkit patch, a switch in the launcher and in `recomplauncher.json`.
 - [x] The rest of the DualSense (2026-11-13): player lights, the light bar (electric blue, red with hits), gyro aim while holding aim (L1), the first effect clearing the power-save bits another program left, a log line when Steam is running; in `test_pad_adaptive` and the launcher's Controls.
 - [ ] Feel them on a DualSense, with Steam quit (Steam Input rewrites the controller's output: that was why nothing reached it in the Resistance ports either).
-- [ ] The light bar following Cole's karma (blue/red) from the game's memory.
+- [x] Heartbeat at low health (2026-11-13): Cole's hit points found (`[0x8F7580] +0x750/+0x754`, `infamous1-lle/notes/health/`), the inFAMOUS 2 port's heartbeat and the toolkit's `cellPad_host_pulse`; checked by writing his health in the tutorial (on at 30%, faster at 5%, off at 100%, the game's own picture grey and back).
+- [ ] The heartbeat with a real hit and a death and respawn (does the pointer follow the new hero?), and silent in cutscenes that keep the world clock running.
+- [ ] The light bar following Cole's karma (blue/red) from the game's memory (not found next to health).
 - [ ] The in-game menu (F1 / Cmd+, / L3+R3) on this game.
 
 ### Rebuild

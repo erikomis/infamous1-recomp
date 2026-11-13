@@ -212,6 +212,14 @@ launcher's Controls. **Quit Steam first:** with Steam Input on it takes over
 the DualSense and the triggers and the light bar stay off (rumble still
 works); the game logs a line when Steam is running.
 
+**Heartbeat at low health** (any controller with rumble): below 35% of Cole's
+health the controller beats like a heart, 70 to 140 beats a minute as it runs
+out, and the light bar pulses red with it; it stops when he recovers or dies,
+and in menus and loading screens (`PS3_HEARTBEAT=0` or the launcher's switch
+turns it off, `PS3_HEARTBEAT_AT=<5-90>` moves the threshold). The game's own
+picture goes black and white at about the same point. How Cole's health was
+found: [`infamous1-lle/notes/health/`](infamous1-lle/notes/health/README.md).
+
 
 | Key | PS3 |
 | --- | --- |

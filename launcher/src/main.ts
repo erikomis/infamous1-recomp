@@ -58,6 +58,7 @@ interface Settings {
   rumble: boolean;
   rumbleStrength: number;
   adaptiveTriggers: boolean;
+  heartbeat: boolean;
   padLight: string;
   padLightHit: boolean;
   gyro: number;
@@ -436,6 +437,7 @@ function bindSettings() {
   bindCheck("q-vsync", "vsync");
   bindCheck("rumble-on", "rumble");
   bindCheck("adaptive-on", "adaptiveTriggers");
+  bindCheck("heartbeat", "heartbeat");
   bindSelect("pad-light", "padLight");
   bindCheck("pad-light-hit", "padLightHit");
   bindSelect("gyro", "gyro");
@@ -588,6 +590,7 @@ function bindSettings() {
       rumble: true,
       rumbleStrength: 100,
       adaptiveTriggers: true,
+      heartbeat: true,
       padLight: "",
       padLightHit: true,
       gyro: 0,
@@ -709,6 +712,7 @@ function syncDependent() {
   for (const id of ["mouse-sens", "mouse-invert", "mouse-invert-x", "mouse-dz", "mouse-capture"]) $<HTMLInputElement>(id).disabled = !settings.mouse;
   $<HTMLInputElement>("rumble-strength").disabled = !settings.rumble;
   $<HTMLButtonElement>("rumble-test").disabled = !settings.rumble;
+  $<HTMLInputElement>("heartbeat").disabled = !settings.rumble;
 }
 
 /** A half-second rumble at the chosen strength through the Gamepad API, so

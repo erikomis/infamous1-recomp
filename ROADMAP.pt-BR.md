@@ -70,7 +70,9 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 - [x] Gatilhos adaptáveis do DualSense (2026-11-13): o gatilho ligado ao raio (R1) tem clique e dispara no clique, o outro tem uma resistência leve, e vibra enquanto dispara; `test_pad_adaptive` no patch do toolkit, uma chave no launcher e no `recomplauncher.json`.
 - [x] O resto do DualSense (2026-11-13): luzes de jogador, a barra de luz (azul elétrico, vermelha com os golpes), mira por giroscópio segurando a mira (L1), o primeiro efeito limpando os bits de economia de energia que outro programa deixou, uma linha no log quando a Steam está aberta; no `test_pad_adaptive` e em Controles no launcher.
 - [ ] Senti-los num DualSense, com a Steam fechada (o Steam Input reescreve a saída do controle: era por isso que nada chegava a ele também nos ports do Resistance).
-- [ ] A barra de luz seguindo o karma do Cole (azul/vermelho) pela memória do jogo.
+- [x] Batimento com pouca vida (2026-11-13): a vida do Cole achada (`[0x8F7580] +0x750/+0x754`, `infamous1-lle/notes/health/`), o batimento do port do inFAMOUS 2 e o `cellPad_host_pulse` do toolkit; conferido escrevendo a vida dele no tutorial (liga em 30%, mais rápido em 5%, desliga em 100%, a imagem do próprio jogo cinza e de volta).
+- [ ] O batimento com um golpe de verdade e com uma morte e o renascimento (o ponteiro acompanha o herói novo?), e mudo em cenas que mantêm o relógio do mundo andando.
+- [ ] A barra de luz seguindo o karma do Cole (azul/vermelho) pela memória do jogo (não achado junto da vida).
 - [ ] O menu no jogo (F1 / Cmd+, / L3+R3) neste jogo.
 
 ### Rebuild

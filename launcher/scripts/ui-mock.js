@@ -16,7 +16,7 @@
     gameLang: "pt", voiceLang: "english", textLang: "", gpuLight: true, gpuSsao: true, skipOcclusionVolumes: false, gammaOverride: false, gamma: 1.0,
     aniso: 8, aa: "fxaa", sharpen: 0.35, upscale: "metalfx", mouse: true, mouseSens: 1.25, mouseInvertY: false,
     mouseInvertX: false, mouseDeadzone: 30, mouseCapture: true, windowMode: "windowed", windowSize: "1920x1080",
-    gameIcon: false, display: "", vsync: true, audioVolume: 85, audioDevice: "", rumble: true, rumbleStrength: 100, adaptiveTriggers: true, padLight: "", padLightHit: true, gyro: 0, gyroAlways: false,
+    gameIcon: false, display: "", vsync: true, audioVolume: 85, audioDevice: "", rumble: true, rumbleStrength: 100, adaptiveTriggers: true, heartbeat: true, padLight: "", padLightHit: true, gyro: 0, gyroAlways: false,
     showFps: false, extraEnv: "", gamePaths: ["/Users/player/Library/Application Support/rpcs3/dev_hdd0/game/NPUA80480"],
     rapPath: "/Users/player/Library/Application Support/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80480_00-XXXXXXXXXXXXXXXX.rap",
     keysPath: "", firmwarePath: "", decryptWith: "auto", saveBackupsKeep: 10, autoUpdateCheck: true,
