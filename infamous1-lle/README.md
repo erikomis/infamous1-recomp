@@ -43,6 +43,16 @@ applied by `../tools/setup_toolkit.sh`): the inFAMOUS 2 port's patch, plus
   `PS3_PAD_LIGHT_HIT=0`), gyro aim (`PS3_PAD_GYRO=<percent>`) while the map's
   L1 (aim) is held or `PS3_PAD_GYRO_MODE=always`. Test:
   `libs/input/tests/test_pad_adaptive.c` (and SDL stubs in `test_pad_hotplug.c`).
+- **SPU lifter (from the inFAMOUS 2 port):** lean `shufb` and local-store
+  access, bit-exact (`runtime/spu/tests/test_spu_shufb_lean.c` and
+  `test_spu_ls_lean.c` check every control value and address, and fail on a
+  planted bug); `SPU_LIFT_LEAN_SHUFB=0` / `SPU_LIFT_LEAN_LS=0` lift the old
+  form. Every SPU image, job module and the libsre kernel are relifted with it
+  (the PPU lift does not change).
+- **Parallel shader builds (from the inFAMOUS 2 port):** a frame's new
+  pipelines build on a worker pool and each encode waits for the ones it uses,
+  so no draw is skipped (`PS3_SHADER_PARALLEL=0` builds them inline as
+  before). The MSL translation is unchanged, so shader caches stay valid.
 
 In the port:
 

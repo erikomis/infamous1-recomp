@@ -54,7 +54,8 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 ### Estabilidade
 
 - [ ] Rodar o `tools/profile_run.sh` em gameplay: fps por período e código mais quente, como linha de base antes do trabalho de iluminação na GPU.
-- [ ] Um aquecimento do cache de shaders, para os engasgos de primeiro uso acontecerem uma vez só.
+- [x] Engasgos de primeiro uso dos shaders (2026-11-13): os pipelines novos são compilados em paralelo num grupo de threads e cada draw espera só pelos seus, nenhum é pulado (do port do inFAMOUS 2, onde o pior engasgo foi de 338 → ~100 ms com cache e de 3 s → 1 s sem).
+- [x] `shufb` e acesso à memória local enxutos no lifter de SPU (2026-11-13, do port do inFAMOUS 2, idênticos bit a bit por testes exaustivos). Um rebuild com eles chegou às mesmas cenas nos mesmos momentos que o build anterior, lado a lado sem janela; os 4-6% a menos de ciclos de SPU medidos no inFAMOUS 2 não foram medidos aqui.
 
 ### Saves
 

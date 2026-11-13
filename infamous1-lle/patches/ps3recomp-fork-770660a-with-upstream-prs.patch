@@ -214,10 +214,10 @@ index 00000000..e6c68672
 +#endif /* PS3EMU_LOG_FIRST_H */
 diff --git a/include/ps3emu/ps3_ftrace.h b/include/ps3emu/ps3_ftrace.h
 new file mode 100644
-index 00000000..6c93d7a2
+index 00000000..403b8fec
 --- /dev/null
 +++ b/include/ps3emu/ps3_ftrace.h
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,250 @@
 +/*
 + * ps3_ftrace -- a timeline of who waits for whom, frame by frame.
 + *
@@ -285,7 +285,9 @@ index 00000000..6c93d7a2
 +    PS3_FT_COMPILE     = 16, /* RSX thread built a shader or pipeline on first use: who = 0 the
 +                              * engine's whole pipeline miss (decompile + backend), 1 vertex /
 +                              * 2 fragment function (HLSL -> MSL -> Metal library), 3 Metal
-+                              * pipeline state, 4 the HLSL -> MSL translation alone (inside 1/2);
++                              * pipeline state, 4 the HLSL -> MSL translation alone (inside 1/2),
++                              * 5 PS3_SHADER_PARALLEL: the encoding thread waited for pool builds
++                              * (b = the pipeline, 0 all); 1-4 then run on the pool's threads too;
 +                              * a = 1 built / 0 failed */
 +    PS3_FT_TEXUP       = 17, /* RSX thread decoded + uploaded a guest texture: a = source KB,
 +                              * b = 0 new, 1 content changed; | 2 when it evicted another */
@@ -513,10 +515,10 @@ index 00000000..3bb19787
 +#endif
 diff --git a/include/ps3emu/ps3_toggles.h b/include/ps3emu/ps3_toggles.h
 new file mode 100644
-index 00000000..f1403fa3
+index 00000000..1b2655d6
 --- /dev/null
 +++ b/include/ps3emu/ps3_toggles.h
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,301 @@
 +/*
 + * ps3_toggles -- performance and debug knobs that change while the game runs.
 + *
@@ -615,6 +617,7 @@ index 00000000..f1403fa3
 +    PS3T_METAL_LEAN_ENCODE,  /* rsx_metal_backend.m: unretained texture binds     */
 +    PS3T_ENG_TEXREG_ONCE,    /* rsx_draw_engine.c: texture units decoded once a draw */
 +    PS3T_METAL_ENCODE_THREAD,/* rsx_metal_backend.m: presents encoded on a thread  */
++    PS3T_SHADER_PARALLEL,    /* rsx_metal_backend.m: pipeline misses on a pool     */
 +    PS3T_COUNT
 +};
 +
@@ -681,6 +684,7 @@ index 00000000..f1403fa3
 +        { "PS3RECOMP_METAL_LEAN_ENCODE", PS3_TK_NOT0, 1 },
 +        { "PS3RECOMP_ENG_TEXREG_ONCE",  PS3_TK_NOT0, 1 },
 +        { "PS3RECOMP_METAL_ENCODE_THREAD", PS3_TK_ATOI, 0 },
++        { "PS3_SHADER_PARALLEL",        PS3_TK_NOT0, 1 },
 +    };
 +    return &d[id];
 +}
@@ -16743,10 +16747,10 @@ index aee795c9..5845a3fa 100644
  
  /* The clear colour most recently set via NV4097_SET_COLOR_CLEAR_VALUE, in the
 diff --git a/libs/video/rsx_metal_backend.m b/libs/video/rsx_metal_backend.m
-index 98db2857..3824ab79 100644
+index 98db2857..cb88b42e 100644
 --- a/libs/video/rsx_metal_backend.m
 +++ b/libs/video/rsx_metal_backend.m
-@@ -48,11 +48,30 @@
+@@ -48,11 +48,31 @@
   */
  #import <Metal/Metal.h>
  #import <QuartzCore/CAMetalLayer.h>
@@ -16773,11 +16777,12 @@ index 98db2857..3824ab79 100644
 +int rsx_metal_capture_available(void) { const char* d = getenv("PS3RECOMP_METAL_SURF_DUMP"); return d && *d; }
 +void rsx_metal_request_capture(void) { __atomic_store_n(&s_capture_req, 1, __ATOMIC_RELEASE); }
 +#include <pthread.h>
++#include <sys/sysctl.h>
 +#include "metal_frame_rate.h"
  #include "rsx_commands.h"
  #include "rsx_metal_backend.h"
  #include "rsx_vertex_fetch.h"
-@@ -61,6 +80,14 @@
+@@ -61,6 +81,14 @@
  #include "rsx_fp_decompiler.h"
  #include "rsx_shader_msl.h"
  #include "rsx_texture_layout.h"
@@ -16792,7 +16797,7 @@ index 98db2857..3824ab79 100644
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -79,6 +106,479 @@
+@@ -79,6 +107,479 @@
  static u32                 s_width  = 1280;
  static u32                 s_height = 720;
  
@@ -17272,7 +17277,7 @@ index 98db2857..3824ab79 100644
  /* ---- vertex layout ----------------------------------------------------------
   * Every draw carries all 16 RSX vertex attributes as float4, fetched on the
   * CPU by rsx_fetch_attrib: 256 bytes per vertex, attribute i at offset i*16.
-@@ -451,8 +951,8 @@ static int create_offscreen(void)
+@@ -451,8 +952,8 @@ static int create_offscreen(void)
  {
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
@@ -17283,7 +17288,7 @@ index 98db2857..3824ab79 100644
                                                         mipmapped:NO];
      td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
      s_offscreen = [s_dev newTextureWithDescriptor:td];
-@@ -460,13 +960,292 @@ static int create_offscreen(void)
+@@ -460,13 +961,292 @@ static int create_offscreen(void)
  }
  
  #if !TARGET_OS_IPHONE
@@ -17578,7 +17583,7 @@ index 98db2857..3824ab79 100644
          initWithContentRect:frame
                    styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                               NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
-@@ -475,20 +1254,61 @@ static int create_window_impl(const char* title)
+@@ -475,20 +1255,61 @@ static int create_window_impl(const char* title)
      if (!s_window) return -1;
  
      [s_window setTitle:[NSString stringWithUTF8String:(title ? title : "ps3recomp")]];
@@ -17641,7 +17646,7 @@ index 98db2857..3824ab79 100644
      return 0;
  }
  
-@@ -715,7 +1535,7 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
+@@ -715,7 +1536,7 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
              fn = compile_guest_function(s_msl, name);
          }
      }
@@ -17650,7 +17655,7 @@ index 98db2857..3824ab79 100644
          fprintf(stderr, "[RSX metal] vertex program %08X: %d instrs -> %s\n",
                  hash, ni, fn ? "ok" : "FAILED (built-in shader instead)"); }
  
-@@ -742,6 +1562,23 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
+@@ -742,6 +1563,23 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
   * and sampled with a direction rather than a 2D coordinate, so it changes the
   * compiled program and belongs in the key -- the D3D12 backend's PSO key
   * carries cube_mask for the same reason. */
@@ -17674,7 +17679,7 @@ index 98db2857..3824ab79 100644
  static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
  {
      if (!vm_base || st->shader_program == 0) return -1;
-@@ -752,6 +1589,8 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
+@@ -752,6 +1590,8 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
  
      u64 key = rsx_fp_structural_hash(*uc, MTL_FP_MAX_BYTES, 1469598103934665603ull);
      if (!key) return -1;                    /* malformed or unterminated */
@@ -17683,7 +17688,7 @@ index 98db2857..3824ab79 100644
      const u32 ctrl      = st->shader_control;
      const u32 ctrl_key  = ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS;
      const u32 alpha_en  = (st->alpha_test_enable && st->alpha_func != 0x0207u) ? 1u : 0u;
-@@ -761,15 +1600,20 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
+@@ -761,15 +1601,20 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
      key = fnv1a64(&alpha_fn, sizeof alpha_fn, key);
      key = fnv1a64(&cube_mask, sizeof cube_mask, key);
  
@@ -17708,7 +17713,7 @@ index 98db2857..3824ab79 100644
      if (ni > 0 && alpha_en &&
          rsx_fp_apply_alpha_test_buffered(s_hlsl, sizeof s_hlsl, st->alpha_func) < 0)
          ni = -1;
-@@ -790,16 +1634,17 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
+@@ -790,16 +1635,17 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
              fn = compile_guest_function(s_msl, name);
          }
      }
@@ -17729,7 +17734,7 @@ index 98db2857..3824ab79 100644
  }
  
  /* Reserve `bytes` of constant staging at a 256-byte boundary. */
-@@ -828,24 +1673,27 @@ static int cb_alloc(u32 bytes, u32* off)
+@@ -828,24 +1674,27 @@ static int cb_alloc(u32 bytes, u32* off)
   * outputs do not link with the built-in fragment shader's inputs. */
  static int guest_programs_for(const rsx_state* st, MtlDraw* d)
  {
@@ -17762,7 +17767,7 @@ index 98db2857..3824ab79 100644
  
      /* VPConst: the 512 transform constants, then the viewport epilogue
       * (see the D3D12 backend's vp_record_cb): x/y identity, and the z lane
-@@ -1084,7 +1932,7 @@ static int tex_slot_for(const rsx_texture_state* t)
+@@ -1084,7 +1933,7 @@ static int tex_slot_for(const rsx_texture_state* t)
  
      id<MTLTexture> tex = upload_texture(vm_base + ea, w, h, fmt, t->control1,
                                          levels, pitch, cube);
@@ -17771,7 +17776,7 @@ index 98db2857..3824ab79 100644
          fprintf(stderr, "[RSX metal] texture %ux%u fmt 0x%02X %u level(s)%s at 0x%08X (%s) -> %s\n",
                  w, h, fmt, levels ? levels : 1u, cube ? " cube" : "", ea,
                  (t->format & 3u) == 1u ? "local" : "main",
-@@ -1279,7 +2127,7 @@ static int surface_get(u32 off, u32 w, u32 h, u32 fmt)
+@@ -1279,7 +2128,7 @@ static int surface_get(u32 off, u32 w, u32 h, u32 fmt)
      td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead |
                 MTLTextureUsagePixelFormatView;
      id<MTLTexture> tex = [s_dev newTextureWithDescriptor:td];
@@ -17780,7 +17785,7 @@ index 98db2857..3824ab79 100644
          fprintf(stderr, "[RSX metal] surface 0x%08X %ux%u fmt 0x%02X -> %s\n",
                  off, w, h, fmt & 0x1Fu, tex ? "ok" : "FAILED"); }
  
-@@ -1401,7 +2249,7 @@ static void textures_for(const rsx_state* st, MtlDraw* d)
+@@ -1401,7 +2250,7 @@ static void textures_for(const rsx_state* st, MtlDraw* d)
          if (surf >= 0) {
              d->samp[u] = samp_slot_for(t);
              if (rt_is_own_target(d, t->offset)) {
@@ -17789,7 +17794,7 @@ index 98db2857..3824ab79 100644
                      fprintf(stderr, "[RSX metal] unit %u samples the surface the pass "
                                      "draws into (0x%08X); reading the zero texture\n",
                              u, t->offset); }
-@@ -1581,7 +2429,8 @@ static void record_draw(const rsx_state* st, u32 prim, u32 base, u32 count,
+@@ -1581,7 +2430,8 @@ static void record_draw(const rsx_state* st, u32 prim, u32 base, u32 count,
       * drops to the built-in shader must still fetch its vertices the same
       * way. Constant staging reserved here for a draw that then fails on
       * vertices is simply left unused until the frame resets it. */
@@ -17799,7 +17804,7 @@ index 98db2857..3824ab79 100644
      if (guest) textures_for(st, d);
  
      u32 first_vert = s_vert_count;
-@@ -2042,7 +2891,11 @@ static void release_surfaces(void)
+@@ -2042,7 +2892,11 @@ static void release_surfaces(void)
  
  #include "rsx_draw_engine.h"
  
@@ -17812,7 +17817,7 @@ index 98db2857..3824ab79 100644
  #define ENG_MAX_PIPES    4096
  #define ENG_MAX_RECORDS  65536   /* inFamous world frames issue >9k records */
  #define ENG_MAX_VIEWS    256
-@@ -2060,14 +2913,34 @@ static void release_surfaces(void)
+@@ -2060,28 +2914,64 @@ static void release_surfaces(void)
  static u32 s_eng_obj_count;
  static u32 s_eng_obj_free[ENG_MAX_OBJECTS];
  static u32 s_eng_obj_free_count;
@@ -17845,14 +17850,28 @@ index 98db2857..3824ab79 100644
      MTLWinding  winding;
 -    char desc[96];   /* PS3RECOMP_METAL_PASS_LOG summary of the fixed-function state */
 +    int ready;       /* pso is final (set last; PS3_SHADER_ASYNC builds it on a queue) */
++    int building;    /* PS3_SHADER_PARALLEL: a pool job still owns pso/ready (cleared
++                      * after them, under s_par_mu); ready stays 0 when it failed */
 +    char desc[144];  /* PS3RECOMP_METAL_PASS_LOG summary of the fixed-function state */
  } EngPipeline;
  static EngPipeline s_eng_pipe[ENG_MAX_PIPES];
  static u32 s_eng_pipe_count;
-@@ -2078,10 +2951,17 @@ static void release_surfaces(void)
- typedef struct { u64 hash; id<MTLFunction> fn; } EngFunc;
+ 
+ /* Compiled MSL functions, keyed on the HLSL the decompilers emitted: one
+  * program is translated and compiled once however many pipeline variants
+- * reference it. */
+-typedef struct { u64 hash; id<MTLFunction> fn; } EngFunc;
++ * reference it. The table is shared by the PS3_SHADER_PARALLEL workers: it
++ * is read and written under s_func_mu, and an entry being built (`busy`)
++ * makes a second thread that wants the same program wait for it rather than
++ * translate it again. */
++typedef struct { u64 hash; id<MTLFunction> fn; int busy; } EngFunc;
  static EngFunc s_eng_func[ENG_MAX_FUNCS];
  static u32 s_eng_func_count;
++static pthread_mutex_t s_func_mu = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t  s_func_cv = PTHREAD_COND_INITIALIZER;
++static id<MTLFunction> eng_function(const char* hlsl, int stage, const char* what);
++static void eng_par_wait(u32 slot);   /* PS3_SHADER_PARALLEL: a pipeline's pool build */
 +/* PS3_SHADER_ASYNC (below, with the shader cache): the build queue, builds
 + * still queued, and draws skipped because their pipeline was not ready. */
 +static dispatch_queue_t s_sc_queue;
@@ -17867,7 +17886,7 @@ index 98db2857..3824ab79 100644
  
  typedef struct { u32 surface, remap, format, view; } EngView;
  static EngView s_eng_view[ENG_MAX_VIEWS];
-@@ -2089,7 +2969,7 @@ static void release_surfaces(void)
+@@ -2089,7 +2979,7 @@ static void release_surfaces(void)
  
  typedef enum {
      ENG_REC_DRAW, ENG_REC_CLEAR_COLOR, ENG_REC_CLEAR_DS, ENG_REC_DEPTH_RESOLVE,
@@ -17876,7 +17895,7 @@ index 98db2857..3824ab79 100644
  } EngRecKind;
  
  typedef struct {
-@@ -2102,7 +2982,9 @@ static void release_surfaces(void)
+@@ -2102,7 +2992,9 @@ static void release_surfaces(void)
      u32 pipeline;
      MTLPrimitiveType topology;
      u32 vb_off, stride, vertex_count;
@@ -17886,7 +17905,7 @@ index 98db2857..3824ab79 100644
      u32 vs_cb_off, vs_cb_bytes;
      float vs_xf[8];             /* VPXform (buffer 2): vp_posscale, vp_posoffset */
      u32 ps_cb_off, ps_cb_bytes;
-@@ -2113,6 +2995,8 @@ static void release_surfaces(void)
+@@ -2113,6 +3005,8 @@ static void release_surfaces(void)
      float vp[4];
      u32   sc[4];
      u32   stencil_ref;
@@ -17895,7 +17914,7 @@ index 98db2857..3824ab79 100644
      float clear_rgba[4];
      u32   clear_flags;
      float clear_depth;
-@@ -2120,8 +3004,15 @@ static void release_surfaces(void)
+@@ -2120,8 +3014,15 @@ static void release_surfaces(void)
      u32   resolve_dst;          /* ENG_REC_DEPTH_RESOLVE target texture */
  } EngRecord;
  
@@ -17912,7 +17931,7 @@ index 98db2857..3824ab79 100644
  static u32 s_eng_dropped;
  
  static u8* s_eng_stage;
-@@ -2158,6 +3049,33 @@ static void release_surfaces(void)
+@@ -2158,6 +3059,33 @@ static void release_surfaces(void)
  static id<MTLRenderPipelineState> s_eng_depth_pso;
  static id<MTLRenderPipelineState> s_eng_depth_rgba_pso;
  static id<MTLSamplerState>        s_eng_point_sampler;
@@ -17946,7 +17965,7 @@ index 98db2857..3824ab79 100644
  
  static NSString* const kEngHelperMSL = @
  "#include <metal_stdlib>\n"
-@@ -2174,17 +3092,454 @@ static void release_surfaces(void)
+@@ -2174,17 +3102,454 @@ static void release_surfaces(void)
  "                            sampler s [[sampler(0)]]) {\n"
  "    return src.sample(s, i.uv);\n"
  "}\n"
@@ -18405,7 +18424,7 @@ index 98db2857..3824ab79 100644
  
  static u32 eng_obj_add(id<MTLTexture> t)
  {
-@@ -2193,10 +3548,15 @@ static u32 eng_obj_add(id<MTLTexture> t)
+@@ -2193,10 +3558,15 @@ static u32 eng_obj_add(id<MTLTexture> t)
      if (s_eng_obj_free_count) {
          slot = s_eng_obj_free[--s_eng_obj_free_count];
      } else {
@@ -18422,7 +18441,7 @@ index 98db2857..3824ab79 100644
      return slot + 1;
  }
  
-@@ -2205,14 +3565,37 @@ static u32 eng_obj_add(id<MTLTexture> t)
+@@ -2205,14 +3575,37 @@ static u32 eng_obj_add(id<MTLTexture> t)
      return (handle && handle <= s_eng_obj_count) ? s_eng_obj[handle - 1] : nil;
  }
  
@@ -18462,7 +18481,7 @@ index 98db2857..3824ab79 100644
          s_eng_obj_retired[i] = 0;
          s_eng_obj[i] = nil;
          s_eng_obj_free[s_eng_obj_free_count++] = i;
-@@ -2224,7 +3607,7 @@ static void eng_obj_release(void* user, u32 handle)
+@@ -2224,7 +3617,7 @@ static void eng_obj_release(void* user, u32 handle)
      (void)user;
      if (!handle || handle > s_eng_obj_count || !s_eng_obj[handle - 1] ||
          s_eng_obj_retired[handle - 1]) return;
@@ -18471,7 +18490,7 @@ index 98db2857..3824ab79 100644
      /* Any view cut from this object stops being valid with it. */
      for (u32 i = 0; i < s_eng_view_count; i++)
          if (s_eng_view[i].surface == handle) {
-@@ -2332,12 +3715,18 @@ static int eng_init(void* user, u32 width, u32 height)
+@@ -2332,12 +3725,19 @@ static int eng_init(void* user, u32 width, u32 height)
      sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
      sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
      s_eng_point_sampler = [s_dev newSamplerStateWithDescriptor:sd];
@@ -18488,10 +18507,11 @@ index 98db2857..3824ab79 100644
      (void)user;
 +    eng_enc_join();   /* PS3RECOMP_METAL_ENCODE_THREAD: a present may still be encoding */
 +    if (s_sc_queue) dispatch_sync(s_sc_queue, ^{});   /* PS3_SHADER_ASYNC builds in flight */
++    eng_par_wait(~0u);                                   /* PS3_SHADER_PARALLEL builds in flight */
      for (u32 i = 0; i < s_eng_obj_count; i++) s_eng_obj[i] = nil;
      for (u32 i = 0; i < s_eng_pipe_count; i++) {
          s_eng_pipe[i].pso = nil;
-@@ -2348,6 +3737,7 @@ static void eng_shutdown(void* user)
+@@ -2348,6 +3748,7 @@ static void eng_shutdown(void* user)
      s_eng_obj_count = s_eng_obj_free_count = 0;
      memset(s_eng_obj_retired, 0, sizeof s_eng_obj_retired);
      s_eng_pipe_count = s_eng_func_count = s_eng_samp_count = s_eng_view_count = 0;
@@ -18499,7 +18519,7 @@ index 98db2857..3824ab79 100644
      s_eng_rec_count = 0;
      for (int k = 0; k < ENG_STAGE_SLOTS; k++) { s_eng_slot_buf[k] = nil; s_eng_slot_busy[k] = 0; }
      s_eng_slot = -1;
-@@ -2357,12 +3747,16 @@ static void eng_shutdown(void* user)
+@@ -2357,12 +3758,16 @@ static void eng_shutdown(void* user)
      s_eng_blit_pso = nil;
      s_eng_depth_pso = nil;
      s_eng_point_sampler = nil;
@@ -18517,7 +18537,7 @@ index 98db2857..3824ab79 100644
      eng_encode_and_commit(nil);
  }
  
-@@ -2405,14 +3799,52 @@ static void eng_texture_upload(void* user, u32 handle, u32 face, u32 mip,
+@@ -2405,14 +3810,52 @@ static void eng_texture_upload(void* user, u32 handle, u32 face, u32 mip,
         bytesPerImage:0];
  }
  
@@ -18571,7 +18591,7 @@ index 98db2857..3824ab79 100644
                                                         mipmapped:NO];
      /* PixelFormatView because a unit sampling this target wears its own
       * TEXTURE_CONTROL1 crossbar as a view swizzle. */
-@@ -2420,10 +3852,29 @@ static u32 eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32 h,
+@@ -2420,10 +3863,29 @@ static u32 eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32 h,
                 MTLTextureUsagePixelFormatView;
      id<MTLTexture> t = [s_dev newTextureWithDescriptor:td];
      if (!t) return 0;
@@ -18603,7 +18623,7 @@ index 98db2857..3824ab79 100644
  }
  
  static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
-@@ -2446,7 +3897,7 @@ static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
+@@ -2446,7 +3908,7 @@ static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
                                   swizzle:MTLTextureSwizzleChannelsMake(
                                               swizzle_sel(sel[1]), swizzle_sel(sel[2]),
                                               swizzle_sel(sel[3]), swizzle_sel(sel[0]))];
@@ -18612,7 +18632,7 @@ index 98db2857..3824ab79 100644
      if (!handle) return 0;
      s_eng_view[s_eng_view_count].surface = surface;
      s_eng_view[s_eng_view_count].remap   = remap;
-@@ -2462,13 +3913,15 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
+@@ -2462,13 +3924,15 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
      if (!s_dev || !w || !h) return 0;
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTL_DEPTH_FORMAT
@@ -18632,7 +18652,7 @@ index 98db2857..3824ab79 100644
  }
  
  /* The sampleable copy of a depth target. The copy is a record in the stream,
-@@ -2494,10 +3947,10 @@ static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
+@@ -2494,10 +3958,10 @@ static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
      }
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR32Float
@@ -18645,7 +18665,7 @@ index 98db2857..3824ab79 100644
      if (!dst) return 0;
  
      EngRecord* r = &s_eng_rec[s_eng_rec_count++];
-@@ -2539,7 +3992,7 @@ static u32 eng_color_snapshot(void* user, u32 surface)
+@@ -2539,7 +4003,7 @@ static u32 eng_color_snapshot(void* user, u32 surface)
                                                             mipmapped:NO];
          td.usage       = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView | MTLTextureUsageRenderTarget;
          td.storageMode = MTLStorageModePrivate;
@@ -18654,7 +18674,7 @@ index 98db2857..3824ab79 100644
          if (!dst) return 0;
          u32 slot = s_eng_csnap_count;
          for (u32 i = 0; i < s_eng_csnap_count; i++) if (!s_eng_csnap[i].src) { slot = i; break; }
-@@ -2556,6 +4009,141 @@ static u32 eng_color_snapshot(void* user, u32 surface)
+@@ -2556,6 +4020,141 @@ static u32 eng_color_snapshot(void* user, u32 surface)
      return dst;
  }
  
@@ -18796,7 +18816,7 @@ index 98db2857..3824ab79 100644
  static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
  {
      (void)user;
-@@ -2575,23 +4163,33 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
+@@ -2575,23 +4174,33 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
          }
      }
      /* One persistent decode target per depth target: each resolve record
@@ -18836,11 +18856,14 @@ index 98db2857..3824ab79 100644
      }
      EngRecord* r = &s_eng_rec[s_eng_rec_count++];
      memset(r, 0, sizeof *r);
-@@ -2602,21 +4200,172 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
+@@ -2602,41 +4211,410 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
      return dst;
  }
  
 -/* ---- pipelines ----------------------------------------------------------- */
+-
+-static id<MTLFunction> eng_function(const char* hlsl, int stage,
+-                                    const char* what)
 +/* ---- persistent shader cache ---------------------------------------------
 + * PS3_SHADER_CACHE=<dir>: keep the HLSL -> MSL translations across runs. A
 + * guest pipeline's first draw decompiles both programs, translates each HLSL
@@ -18865,7 +18888,29 @@ index 98db2857..3824ab79 100644
 +
 +/* The main executable's LC_UUID as hex, or "nouuid". */
 +static void sc_build_id(char* out, size_t n)
-+{
+ {
+-    const u64 hash = fnv1a64(hlsl, (u32)strlen(hlsl), 1469598103934665603ull);
+-    for (u32 i = 0; i < s_eng_func_count; i++)
+-        if (s_eng_func[i].hash == hash) return s_eng_func[i].fn;
+-    if (s_eng_func_count >= ENG_MAX_FUNCS) return nil;
+-
+-    id<MTLFunction> fn = nil;
+-    char name[64];
+-    snprintf(name, sizeof name, "%s_%016llx.hlsl", what, (unsigned long long)hash);
+-    dump_shader(name, hlsl);
+-    if (rsx_hlsl_to_msl(hlsl, stage, s_msl, sizeof s_msl, s_log, sizeof s_log) != 0) {
+-        fprintf(stderr, "[rsx engine/metal] %s %016llx: %s\n", what,
+-                (unsigned long long)hash, s_log);
+-    } else {
+-        snprintf(name, sizeof name, "%s_%016llx.msl", what, (unsigned long long)hash);
+-        dump_shader(name, s_msl);
+-        snprintf(name, sizeof name, "%s %016llx", what, (unsigned long long)hash);
+-        fn = compile_guest_function(s_msl, name);
+-    }
+-    s_eng_func[s_eng_func_count].hash = hash;
+-    s_eng_func[s_eng_func_count].fn   = fn;
+-    s_eng_func_count++;
+-    return fn;
 +    snprintf(out, n, "nouuid");
 +    const struct mach_header_64* h = (const struct mach_header_64*)_dyld_get_image_header(0);
 +    if (!h || h->magic != MH_MAGIC_64) return;
@@ -18878,16 +18923,16 @@ index 98db2857..3824ab79 100644
 +        }
 +        lc = (const struct load_command*)((const u8*)lc + lc->cmdsize);
 +    }
-+}
+ }
  
--static id<MTLFunction> eng_function(const char* hlsl, int stage,
--                                    const char* what)
+-/* Engine pipelines take the viewport epilogue from a block of its own:
+- * buffer 0 then holds only the 512 rows, which lets a draw stage just the
+- * rows its program reads (eng_bind_vs_constants_range). The VPConst text is
+- * the one the VP decompiler and the engine's fixed-function shader both
+- * emit; anything else is refused rather than run against the wrong layout. */
+-static const char kEngVPConstJoined[] =
 +static int sc_on(void)
- {
--    const u64 hash = fnv1a64(hlsl, (u32)strlen(hlsl), 1469598103934665603ull);
--    for (u32 i = 0; i < s_eng_func_count; i++)
--        if (s_eng_func[i].hash == hash) return s_eng_func[i].fn;
--    if (s_eng_func_count >= ENG_MAX_FUNCS) return nil;
++{
 +    if (__builtin_expect(s_sc_state >= 0, 1)) return s_sc_state;
 +    s_sc_state = 0;
 +    const char* e = getenv("PS3_SHADER_CACHE");
@@ -18987,46 +19032,274 @@ index 98db2857..3824ab79 100644
 +    return s_sc_async;
 +}
 +
++/* PS3_SHADER_PARALLEL (default on; 0 = the serial path, live through
++ * PS3_TOGGLE_FILE): a pipeline miss returns its handle at once and its
++ * shaders are translated (glslang + spirv-cross, ~8 ms each), compiled and the
++ * pipeline state built on a pool of worker threads, so the misses of one frame
++ * overlap each other and the rest of the FIFO drain instead of running one
++ * after another on the RSX thread (in New Marais, 39 shaders new to the cache
++ * made a 331 ms frame; 2026-11-12, 3 workers: ~100 ms). Nothing is skipped:
++ * before a submission's draws are encoded (a flush, a present, on whichever
++ * thread encodes) every pipeline they use is waited for, and the waiting
++ * thread runs queued builds itself meanwhile. A build that fails leaves the pipeline not ready and its draws
++ * are dropped, as the serial path drops a pipeline it could not build.
++ * Workers: PS3_SHADER_WORKERS=<n>, default the performance cores minus five
++ * (five SPU threads, the PPU and the RSX thread are the game's busy ones),
++ * at least 2. PS3_SHADER_ASYNC=1 keeps its own serial queue and skips. */
++typedef struct EngParJob {
++    struct EngParJob* next;
++    u32   slot;
++    char* vs;            /* split VS HLSL (malloc) */
++    char* ps;            /* PS HLSL (malloc) */
++    void* pd;            /* MTLRenderPipelineDescriptor, CFBridgingRetain'd */
++} EngParJob;
++static pthread_mutex_t s_par_mu = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t  s_par_work = PTHREAD_COND_INITIALIZER;   /* a job was queued */
++static pthread_cond_t  s_par_done = PTHREAD_COND_INITIALIZER;   /* a job finished */
++static EngParJob *s_par_head, *s_par_tail;
++static volatile u32 s_par_inflight;     /* queued + running */
++static u32 s_par_workers;               /* threads started (0 = none yet) */
++static u32 s_par_jobs, s_par_waits;     /* stats: jobs submitted, encode waits */
++static double s_par_wait_ms;
++static int s_par_on = -1;               /* PS3T_SHADER_PARALLEL */
++static void eng_par_set(int id, int v) { (void)id; __atomic_store_n(&s_par_on, v != 0, __ATOMIC_RELAXED); }
++
++static void eng_par_run(EngParJob* j)
++{
++    @autoreleasepool {
++        MTLRenderPipelineDescriptor* pd = (MTLRenderPipelineDescriptor*)CFBridgingRelease(j->pd);
++        id<MTLFunction> v = eng_function(j->vs, RSX_SHADER_STAGE_VERTEX, "vp");
++        id<MTLFunction> f = v ? eng_function(j->ps, RSX_SHADER_STAGE_FRAGMENT, "fp") : nil;
++        id<MTLRenderPipelineState> built = nil;
++        if (v && f) {
++            pd.vertexFunction = v; pd.fragmentFunction = f;
++            NSError* e = nil;
++            const uint64_t t0 = PS3_FT_ON() ? ps3_ft_now() : 0;
++            built = [s_dev newRenderPipelineStateWithDescriptor:pd error:&e];
++            if (t0) ps3_ft_span(PS3_FT_COMPILE, 3, built != nil, 0, t0, ps3_ft_now());
++            if (!built) fprintf(stderr, "[rsx engine/metal] pipeline state failed: %s\n",
++                                [[e localizedDescription] UTF8String]);
++        }
++        if (!built) fprintf(stderr, "[rsx engine/metal] pipeline p=%u could not be built; its draws are dropped\n",
++                            j->slot + 1);
++        s_eng_pipe[j->slot].pso = built;
++        __atomic_store_n(&s_eng_pipe[j->slot].ready, built ? 1 : 0, __ATOMIC_RELEASE);
++    }
++    free(j->vs); free(j->ps);
++    const u32 slot = j->slot;
++    if (j->next != j) free(j);   /* next == j: a job on the caller's stack */
++    pthread_mutex_lock(&s_par_mu);
++    __atomic_store_n(&s_eng_pipe[slot].building, 0, __ATOMIC_RELEASE);
++    s_par_inflight--;
++    pthread_cond_broadcast(&s_par_done);
++    pthread_mutex_unlock(&s_par_mu);
++}
++
++/* Under s_par_mu: the queued job for `slot` (any slot when slot == ~0u: the
++ * oldest), unlinked, or NULL. */
++static EngParJob* eng_par_take_locked(u32 slot)
++{
++    EngParJob *prev = NULL, *j = s_par_head;
++    while (j && slot != ~0u && j->slot != slot) { prev = j; j = j->next; }
++    if (!j) return NULL;
++    if (prev) prev->next = j->next; else s_par_head = j->next;
++    if (s_par_tail == j) s_par_tail = prev;
++    j->next = NULL;
++    return j;
++}
++
++static void* eng_par_worker(void* arg)
++{
++    (void)arg;
++    pthread_setname_np("ps3recomp.shaders");
++    pthread_mutex_lock(&s_par_mu);
++    for (;;) {
++        EngParJob* j;
++        while (!(j = eng_par_take_locked(~0u))) pthread_cond_wait(&s_par_work, &s_par_mu);
++        pthread_mutex_unlock(&s_par_mu);
++        eng_par_run(j);
++        pthread_mutex_lock(&s_par_mu);
++    }
++    return NULL;
++}
++
++/* PS3_SHADER_PARALLEL is on (and PS3_SHADER_ASYNC off): the pool exists. */
++static int eng_par_ready(void)
++{
++    if (__builtin_expect(__atomic_load_n(&s_par_on, __ATOMIC_RELAXED) < 0, 0))
++        ps3_toggle_watch(PS3T_SHADER_PARALLEL, eng_par_set);
++    if (!__atomic_load_n(&s_par_on, __ATOMIC_RELAXED) || sc_async()) return 0;
++    if (s_par_workers) return 1;
++    /* The translator's own once-only state (glslang's process init, its
++     * knob reads) is set up here, on this thread, before any worker runs. */
++    { static const char warm[] = "float4 main() : SV_Target { return float4(0, 0, 0, 1); }\n";
++      char* out = (char*)malloc(64 * 1024); char log[256];
++      if (out) { (void)rsx_hlsl_to_msl(warm, RSX_SHADER_STAGE_FRAGMENT, out, 64 * 1024, log, sizeof log); free(out); } }
++    (void)sc_on();
++    int n = 0;
++    const char* e = getenv("PS3_SHADER_WORKERS");
++    if (e && atoi(e) > 0) n = atoi(e);
++    else {
++        int pc = 0; size_t sz = sizeof pc;
++        if (sysctlbyname("hw.perflevel0.physicalcpu", &pc, &sz, NULL, 0) != 0 || pc <= 0) pc = 4;
++        n = pc - 5;
++        if (n < 2) n = 2;
++    }
++    if (n > 16) n = 16;
++    pthread_attr_t at;
++    pthread_attr_init(&at);
++    pthread_attr_set_qos_class_np(&at, QOS_CLASS_USER_INITIATED, 0);
++    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
++    pthread_attr_setstacksize(&at, 8u << 20);   /* glslang recurses on deep expressions */
++    for (int i = 0; i < n; i++) {
++        pthread_t t;
++        if (pthread_create(&t, &at, eng_par_worker, NULL) == 0) s_par_workers++;
++    }
++    pthread_attr_destroy(&at);
++    if (!s_par_workers) { __atomic_store_n(&s_par_on, 0, __ATOMIC_RELAXED); return 0; }
++    fprintf(stderr, "[shader cache] PS3_SHADER_PARALLEL: new pipelines build on %u worker thread(s)"
++                    " and are waited for before their draws are encoded\n", s_par_workers);
++    return 1;
++}
++
++static void eng_par_submit(u32 slot, char* vs, char* ps, MTLRenderPipelineDescriptor* pd)
++{
++    EngParJob* j = (EngParJob*)calloc(1, sizeof *j);
++    if (!j) {   /* no memory for a job: build it here, as the serial path would */
++        EngParJob local = { NULL, slot, vs, ps, (void*)CFBridgingRetain(pd) };
++        local.next = &local;
++        pthread_mutex_lock(&s_par_mu); s_par_inflight++; pthread_mutex_unlock(&s_par_mu);
++        eng_par_run(&local);
++        return;
++    }
++    j->slot = slot; j->vs = vs; j->ps = ps; j->pd = (void*)CFBridgingRetain(pd);
++    pthread_mutex_lock(&s_par_mu);
++    if (s_par_tail) s_par_tail->next = j; else s_par_head = j;
++    s_par_tail = j;
++    s_par_inflight++;
++    s_par_jobs++;
++    pthread_cond_signal(&s_par_work);
++    pthread_mutex_unlock(&s_par_mu);
++}
++
++/* Wait until pipeline `slot` is built, or every queued/running build when
++ * slot == ~0u, running queued builds on this thread meanwhile (the one asked
++ * for first, else the oldest). */
++static void eng_par_wait(u32 slot)
++{
++    if (slot != ~0u ? !__atomic_load_n(&s_eng_pipe[slot].building, __ATOMIC_ACQUIRE)
++                    : !__atomic_load_n(&s_par_inflight, __ATOMIC_ACQUIRE)) return;
++    const uint64_t t0 = PS3_FT_ON() ? ps3_ft_now() : 0;
++    const double w0 = (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    pthread_mutex_lock(&s_par_mu);
++    while (slot != ~0u ? s_eng_pipe[slot].building : s_par_inflight != 0) {
++        EngParJob* j = slot != ~0u ? eng_par_take_locked(slot) : NULL;
++        if (!j) j = eng_par_take_locked(~0u);
++        if (j) {
++            pthread_mutex_unlock(&s_par_mu);
++            eng_par_run(j);
++            pthread_mutex_lock(&s_par_mu);
++            continue;
++        }
++        pthread_cond_wait(&s_par_done, &s_par_mu);
++    }
++    s_par_waits++;
++    s_par_wait_ms += ((double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - w0) / 1e6;
++    pthread_mutex_unlock(&s_par_mu);
++    if (t0) ps3_ft_span(PS3_FT_COMPILE, 5, 1, slot != ~0u ? slot + 1 : 0, t0, ps3_ft_now());
++}
++
++/* Before a submission is encoded: every pipeline its draws use is built. */
++static void eng_par_wait_records(const EngRecord* recs, u32 n)
++{
++    if (!__atomic_load_n(&s_par_inflight, __ATOMIC_ACQUIRE)) return;
++    for (u32 i = 0; i < n; i++) {
++        const u32 p = recs[i].pipeline;
++        if (recs[i].kind == ENG_REC_DRAW && p && p <= s_eng_pipe_count &&
++            __atomic_load_n(&s_eng_pipe[p - 1].building, __ATOMIC_ACQUIRE))
++            eng_par_wait(p - 1);
++    }
++}
++
 +/* ---- pipelines ----------------------------------------------------------- */
 +
 +static id<MTLFunction> eng_function(const char* hlsl, int stage,
 +                                    const char* what)
 +{
 +    const u64 hash = fnv1a64(hlsl, (u32)strlen(hlsl), 1469598103934665603ull);
-+    for (u32 i = 0; i < s_eng_func_count; i++)
-+        if (s_eng_func[i].hash == hash) return s_eng_func[i].fn;
-+    if (s_eng_func_count >= ENG_MAX_FUNCS) return nil;
- 
-     id<MTLFunction> fn = nil;
-+    const uint64_t ft_c0 = PS3_FT_ON() ? ps3_ft_now() : 0;
-     char name[64];
-     snprintf(name, sizeof name, "%s_%016llx.hlsl", what, (unsigned long long)hash);
-     dump_shader(name, hlsl);
--    if (rsx_hlsl_to_msl(hlsl, stage, s_msl, sizeof s_msl, s_log, sizeof s_log) != 0) {
-+    /* PS3_SHADER_CACHE: the translation from an earlier run. */
-+    const u64 sc_key = sc_on() ? fnv1a64(&stage, sizeof stage, fnv1a64(hlsl, (u32)strlen(hlsl), s_sc_salt)) : 0;
-+    int msl_rc;
-+    if (sc_key && sc_msl_get(sc_key, s_msl, sizeof s_msl)) {
-+        msl_rc = 0; s_sc_hits++;
-+    } else {
-+        msl_rc = rsx_hlsl_to_msl(hlsl, stage, s_msl, sizeof s_msl, s_log, sizeof s_log);
-+        if (sc_key && msl_rc == 0) { sc_msl_put(sc_key, s_msl); s_sc_miss++; }
++    u32 at;
++    pthread_mutex_lock(&s_func_mu);
++    for (;;) {
++        u32 i = 0;
++        while (i < s_eng_func_count && s_eng_func[i].hash != hash) i++;
++        if (i == s_eng_func_count) break;
++        if (!s_eng_func[i].busy) {          /* built (or failed: nil) */
++            id<MTLFunction> fn = s_eng_func[i].fn;
++            pthread_mutex_unlock(&s_func_mu);
++            return fn;
++        }
++        /* Another thread is building this program: wait for its result. The
++         * builder never waits on anything itself, so this cannot deadlock. */
++        pthread_cond_wait(&s_func_cv, &s_func_mu);
 +    }
-+    if (ft_c0) ps3_ft_span(PS3_FT_COMPILE, 4, msl_rc == 0, 0, ft_c0, ps3_ft_now());
-+    if (msl_rc != 0) {
-         fprintf(stderr, "[rsx engine/metal] %s %016llx: %s\n", what,
-                 (unsigned long long)hash, s_log);
-     } else {
-@@ -2625,6 +4374,8 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
-         snprintf(name, sizeof name, "%s %016llx", what, (unsigned long long)hash);
-         fn = compile_guest_function(s_msl, name);
-     }
-+    if (ft_c0) ps3_ft_span(PS3_FT_COMPILE, stage == RSX_SHADER_STAGE_VERTEX ? 1u : 2u,
-+                           fn != nil, 0, ft_c0, ps3_ft_now());
-     s_eng_func[s_eng_func_count].hash = hash;
-     s_eng_func[s_eng_func_count].fn   = fn;
-     s_eng_func_count++;
-@@ -2694,11 +4445,20 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
++    if (s_eng_func_count >= ENG_MAX_FUNCS) { pthread_mutex_unlock(&s_func_mu); return nil; }
++    at = s_eng_func_count++;
++    s_eng_func[at].hash = hash;
++    s_eng_func[at].fn   = nil;
++    s_eng_func[at].busy = 1;
++    pthread_mutex_unlock(&s_func_mu);
++
++    /* Per call, not the shared s_msl/s_log: several of these run at once. */
++    char* msl = (char*)malloc(sizeof s_msl);
++    char* log = (char*)malloc(sizeof s_log);
++    id<MTLFunction> fn = nil;
++    if (msl && log) {
++        const uint64_t ft_c0 = PS3_FT_ON() ? ps3_ft_now() : 0;
++        char name[64];
++        snprintf(name, sizeof name, "%s_%016llx.hlsl", what, (unsigned long long)hash);
++        dump_shader(name, hlsl);
++        /* PS3_SHADER_CACHE: the translation from an earlier run. */
++        const u64 sc_key = sc_on() ? fnv1a64(&stage, sizeof stage, fnv1a64(hlsl, (u32)strlen(hlsl), s_sc_salt)) : 0;
++        int msl_rc;
++        log[0] = 0;
++        if (sc_key && sc_msl_get(sc_key, msl, sizeof s_msl)) {
++            msl_rc = 0; __atomic_add_fetch(&s_sc_hits, 1, __ATOMIC_RELAXED);
++        } else {
++            msl_rc = rsx_hlsl_to_msl(hlsl, stage, msl, sizeof s_msl, log, sizeof s_log);
++            if (sc_key && msl_rc == 0) { sc_msl_put(sc_key, msl); __atomic_add_fetch(&s_sc_miss, 1, __ATOMIC_RELAXED); }
++        }
++        if (ft_c0) ps3_ft_span(PS3_FT_COMPILE, 4, msl_rc == 0, 0, ft_c0, ps3_ft_now());
++        if (msl_rc != 0) {
++            fprintf(stderr, "[rsx engine/metal] %s %016llx: %s\n", what,
++                    (unsigned long long)hash, log);
++        } else {
++            snprintf(name, sizeof name, "%s_%016llx.msl", what, (unsigned long long)hash);
++            dump_shader(name, msl);
++            snprintf(name, sizeof name, "%s %016llx", what, (unsigned long long)hash);
++            fn = compile_guest_function(msl, name);
++        }
++        if (ft_c0) ps3_ft_span(PS3_FT_COMPILE, stage == RSX_SHADER_STAGE_VERTEX ? 1u : 2u,
++                               fn != nil, 0, ft_c0, ps3_ft_now());
++    }
++    free(msl); free(log);
++    pthread_mutex_lock(&s_func_mu);
++    s_eng_func[at].fn   = fn;
++    s_eng_func[at].busy = 0;
++    pthread_cond_broadcast(&s_func_cv);
++    pthread_mutex_unlock(&s_func_mu);
++    return fn;
++}
++
++/* Engine pipelines take the viewport epilogue from a block of its own:
++ * buffer 0 then holds only the 512 rows, which lets a draw stage just the
++ * rows its program reads (eng_bind_vs_constants_range). The VPConst text is
++ * the one the VP decompiler and the engine's fixed-function shader both
++ * emit; anything else is refused rather than run against the wrong layout. */
++static const char kEngVPConstJoined[] =
+     "cbuffer VPConst : register(b0) {\n"
+     "    float4 vp_c[512];\n"
+     "    float4 vp_posscale;\n"
+@@ -2694,11 +4672,25 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
                      "epilogue is bound separately)\n");
          return 0;
      }
@@ -19035,11 +19308,16 @@ index 98db2857..3824ab79 100644
 -    if (!vs) return 0;
 -    id<MTLFunction> fs = eng_function(ps_hlsl, RSX_SHADER_STAGE_FRAGMENT, "fp");
 -    if (!fs) return 0;
-+    /* PS3_SHADER_ASYNC: the functions and the state are built on the queue. */
++    /* PS3_SHADER_ASYNC: the functions and the state are built on the queue.
++     * PS3_SHADER_PARALLEL: on the worker pool, waited for before encoding. A
++     * framebuffer-fetch program stays serial: the draw engine falls back to
++     * the copies when its pipeline does not build, and it has to know now. */
 +    const int async = sc_async();
++    const int par = !async && !strstr(ps_hlsl, "SubpassInput<") && eng_par_ready();
++    const int defer = async || par;
 +    id<MTLFunction> vs = nil, fs = nil;
 +    char* ps_copy = NULL;
-+    if (!async) {
++    if (!defer) {
 +        vs = eng_function(vs_split, RSX_SHADER_STAGE_VERTEX, "vp");
 +        free(vs_split); vs_split = NULL;
 +        if (!vs) return 0;
@@ -19052,7 +19330,7 @@ index 98db2857..3824ab79 100644
  
      /* Attribute index is the layout SLOT, not the guest's ATTRn number.
       * glslang numbers an HLSL input struct's members in DECLARATION order --
-@@ -2727,17 +4487,42 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2727,17 +4719,42 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
      if ((rs->color_mask >>  8) & 0xFF) wm |= MTLColorWriteMaskGreen;
      if ((rs->color_mask >> 16) & 0xFF) wm |= MTLColorWriteMaskRed;
      if ((rs->color_mask >> 24) & 0xFF) wm |= MTLColorWriteMaskAlpha;
@@ -19103,7 +19381,7 @@ index 98db2857..3824ab79 100644
              ca.blendingEnabled             = YES;
              ca.sourceRGBBlendFactor        = blend_factor_to_metal(rs->sf_rgb);
              ca.destinationRGBBlendFactor   = blend_factor_to_metal(rs->df_rgb);
-@@ -2748,13 +4533,17 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2748,13 +4765,17 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
          }
      }
  
@@ -19115,7 +19393,7 @@ index 98db2857..3824ab79 100644
 -                [[err localizedDescription] UTF8String]);
 -        return 0;
 +    id<MTLRenderPipelineState> pso = nil;
-+    if (!async) {
++    if (!defer) {
 +        NSError* err = nil;
 +        const uint64_t ft_p0 = PS3_FT_ON() ? ps3_ft_now() : 0;
 +        pso = [s_dev newRenderPipelineStateWithDescriptor:pd error:&err];
@@ -19128,7 +19406,7 @@ index 98db2857..3824ab79 100644
      }
  
      /* Depth and stencil are pipeline state in D3D12 and an encoder object in
-@@ -2787,11 +4576,12 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2787,11 +4808,13 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
          }
      }
      id<MTLDepthStencilState> ds = [s_dev newDepthStencilStateWithDescriptor:dd];
@@ -19138,11 +19416,12 @@ index 98db2857..3824ab79 100644
      const u32 slot = s_eng_pipe_count++;
      s_eng_pipe[slot].pso = pso;
      s_eng_pipe[slot].ds  = ds;
-+    __atomic_store_n(&s_eng_pipe[slot].ready, async ? 0 : 1, __ATOMIC_RELEASE);
++    __atomic_store_n(&s_eng_pipe[slot].ready, defer ? 0 : 1, __ATOMIC_RELEASE);
++    __atomic_store_n(&s_eng_pipe[slot].building, par, __ATOMIC_RELEASE);
      /* CULL_FACE FRONT=0x0404 BACK=0x0405 FRONT_AND_BACK=0x0408 (front here,
       * as in the D3D12 engine); FRONT_FACE CW=0x0900 CCW=0x0901. */
      s_eng_pipe[slot].cull = MTLCullModeNone;
-@@ -2801,20 +4591,47 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2801,21 +4824,50 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
                                      : (rs->cull_face == 0x0405u ? MTLCullModeBack
                                                                  : MTLCullModeNone);
      snprintf(s_eng_pipe[slot].desc, sizeof s_eng_pipe[slot].desc,
@@ -19182,6 +19461,7 @@ index 98db2857..3824ab79 100644
 +            __atomic_sub_fetch(&s_sc_async_pending, 1, __ATOMIC_RELAXED);
 +        });
 +    }
++    if (par) eng_par_submit(slot, vs_split, ps_copy, pd);
      return slot + 1;
  }
  
@@ -19190,9 +19470,11 @@ index 98db2857..3824ab79 100644
      (void)user;
 +    eng_enc_join();   /* PS3RECOMP_METAL_ENCODE_THREAD: a present may still be encoding */
      if (pipeline && pipeline <= s_eng_pipe_count) {
++        eng_par_wait(pipeline - 1);   /* PS3_SHADER_PARALLEL: its build owns pso */
          s_eng_pipe[pipeline - 1].pso = nil;
          s_eng_pipe[pipeline - 1].ds  = nil;
-@@ -2823,16 +4640,32 @@ static void eng_pipeline_release(void* user, u32 pipeline)
+     }
+@@ -2823,16 +4875,32 @@ static void eng_pipeline_release(void* user, u32 pipeline)
  
  /* ---- per-draw binding ---------------------------------------------------- */
  
@@ -19228,7 +19510,7 @@ index 98db2857..3824ab79 100644
      if (s_eng_samp_count >= ENG_MAX_SAMPLERS) return -1;
      MTLSamplerDescriptor* sd = [MTLSamplerDescriptor new];
      sd.minFilter = d->min_linear ? MTLSamplerMinMagFilterLinear
-@@ -2847,12 +4680,23 @@ static int eng_sampler_slot(const rsx_be_sampler_desc* d)
+@@ -2847,12 +4915,23 @@ static int eng_sampler_slot(const rsx_be_sampler_desc* d)
      sd.sAddressMode = gcm_wrap_to_metal(d->wrap_s);
      sd.tAddressMode = gcm_wrap_to_metal(d->wrap_t);
      sd.rAddressMode = gcm_wrap_to_metal(d->wrap_r);
@@ -19253,7 +19535,7 @@ index 98db2857..3824ab79 100644
      return slot;
  }
  
-@@ -2967,19 +4811,50 @@ static void eng_bind_vertex_textures(void* user, const u32* textures,
+@@ -2967,19 +5046,50 @@ static void eng_bind_vertex_textures(void* user, const u32* textures,
  static void eng_set_viewport(void* user, float x, float y, float w, float h)
  {
      (void)user;
@@ -19308,18 +19590,18 @@ index 98db2857..3824ab79 100644
  
  static void eng_draw(void* user, rsx_topology topology, const void* vertices,
                       u32 vertex_count, u32 stride, const u32* indices,
-@@ -2999,12 +4874,80 @@ static void eng_draw(void* user, rsx_topology topology, const void* vertices,
+@@ -2999,12 +5109,80 @@ static void eng_draw(void* user, rsx_topology topology, const void* vertices,
      r->kind         = ENG_REC_DRAW;
      r->topology     = topo_to_metal(topology);
      r->vb_off       = vb_off;
 +    r->vb_buf       = 0;
-     r->stride       = stride;
-     r->vertex_count = vertex_count;
-     r->ib_off       = ib_off;
++    r->stride       = stride;
++    r->vertex_count = vertex_count;
++    r->ib_off       = ib_off;
 +    r->ib_buf       = 0;
-     r->index_count  = indices ? index_count : 0;
- }
- 
++    r->index_count  = indices ? index_count : 0;
++}
++
 +static u32 eng_vbuf_create(void* user, const void* data, u32 bytes)
 +{
 +    (void)user;
@@ -19358,13 +19640,13 @@ index 98db2857..3824ab79 100644
 +    r->topology     = topo_to_metal(topology);
 +    r->vb_off       = 0;
 +    r->vb_buf       = vbuf;
-+    r->stride       = stride;
-+    r->vertex_count = vertex_count;
-+    r->ib_off       = ib_off;
+     r->stride       = stride;
+     r->vertex_count = vertex_count;
+     r->ib_off       = ib_off;
 +    r->ib_buf       = 0;
-+    r->index_count  = indices ? index_count : 0;
-+}
-+
+     r->index_count  = indices ? index_count : 0;
+ }
+ 
 +/* draw_vbuf with the indices in a persistent buffer too: nothing staged. */
 +static void eng_draw_vbuf_ib(void* user, rsx_topology topology, u32 vbuf,
 +                             u32 vertex_count, u32 stride, u32 ibuf, u32 index_count)
@@ -19389,7 +19671,7 @@ index 98db2857..3824ab79 100644
  static void eng_clear_color(void* user, u32 surface, const float rgba[4])
  {
      (void)user;
-@@ -3050,6 +4993,8 @@ static void eng_clear_depth_stencil(void* user, u32 depth, u32 flags,
+@@ -3050,6 +5228,8 @@ static void eng_clear_depth_stencil(void* user, u32 depth, u32 flags,
      const void* pso; const void* ds;
      int cull, winding;
      u32 stencil_ref;
@@ -19398,7 +19680,7 @@ index 98db2857..3824ab79 100644
      int have_vp, have_sc;
      MTLViewport vp;
      MTLScissorRect sc;
-@@ -3068,10 +5013,134 @@ static void eng_bound_reset(void)
+@@ -3068,10 +5248,134 @@ static void eng_bound_reset(void)
  }
  #define ENG_PTR(o) ((__bridge const void*)(o))
  
@@ -19533,15 +19815,18 @@ index 98db2857..3824ab79 100644
      /* PS3RECOMP_METAL_SKIP_PIPE=a,b,...: drop draws using those pipelines
       * (pass-log p= numbers) to bisect which pass breaks an image. */
      { static u32 skip[16]; static int nskip = -1;
-@@ -3079,6 +5148,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3079,6 +5383,10 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
            while (e && *e && nskip < 16) { skip[nskip++] = (u32)strtoul(e, (char**)&e, 10); if (*e == ',') e++; else break; } }
        for (int k = 0; k < nskip; k++) if (skip[k] == r->pipeline) return; }
      const EngPipeline* p = &s_eng_pipe[r->pipeline - 1];
++    /* PS3_SHADER_PARALLEL: eng_par_wait_records waited for it already; this
++     * only catches a record that slipped past that. */
++    if (__builtin_expect(__atomic_load_n(&p->building, __ATOMIC_ACQUIRE), 0)) eng_par_wait(r->pipeline - 1);
 +    if (!__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) { s_sc_async_skipped++; return; }
      if (!p->pso) return;
      EngBound* b = &s_eng_bound;
      if (b->pso != ENG_PTR(p->pso)) { [enc setRenderPipelineState:p->pso]; b->pso = ENG_PTR(p->pso); }
-@@ -3098,6 +5168,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3098,6 +5406,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
      }
      if (b->winding != (int)p->winding) { [enc setFrontFacingWinding:p->winding]; b->winding = (int)p->winding; }
      if (b->stencil_ref != r->stencil_ref) { [enc setStencilReferenceValue:r->stencil_ref]; b->stencil_ref = r->stencil_ref; }
@@ -19556,7 +19841,7 @@ index 98db2857..3824ab79 100644
      MTLViewport vp = { r->vp[0], r->vp[1], r->vp[2], r->vp[3], 0.0, 1.0 };
      if (!b->have_vp || memcmp(&b->vp, &vp, sizeof vp)) { [enc setViewport:vp]; b->vp = vp; b->have_vp = 1; }
      if (r->sc[2] && r->sc[3]) {
-@@ -3105,7 +5183,15 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3105,7 +5421,15 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
          if (!b->have_sc || memcmp(&b->sc, &sc, sizeof sc)) { [enc setScissorRect:sc]; b->sc = sc; b->have_sc = 1; }
      }
      /* Same buffer, new offset: setVertexBufferOffset is the cheap form. */
@@ -19573,7 +19858,7 @@ index 98db2857..3824ab79 100644
          [enc setVertexBuffer:stage offset:r->vb_off atIndex:MTL_VB_INDEX];
          b->buf[0] = ENG_PTR(stage); b->buf_off[0] = r->vb_off;
      } else if (b->buf_off[0] != r->vb_off) {
-@@ -3131,9 +5217,60 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3131,9 +5455,60 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
              [enc setFragmentBufferOffset:r->ps_cb_off atIndex:1]; b->fbuf_off = r->ps_cb_off;
          }
      }
@@ -19634,7 +19919,7 @@ index 98db2857..3824ab79 100644
          id<MTLSamplerState> sm = r->samp[u] >= 0 ? s_eng_samp[r->samp[u]].samp : s_default_sampler;
          if (b->ftex[u] != ENG_PTR(t)) { [enc setFragmentTexture:t atIndex:(NSUInteger)u]; b->ftex[u] = ENG_PTR(t); }
          if (b->fsamp[u] != ENG_PTR(sm)) { [enc setFragmentSamplerState:sm atIndex:(NSUInteger)u]; b->fsamp[u] = ENG_PTR(sm); }
-@@ -3145,6 +5282,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3145,6 +5520,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
          if (b->vtex[u] != ENG_PTR(t)) { [enc setVertexTexture:t atIndex:MTL_VTEX_INDEX(u)]; b->vtex[u] = ENG_PTR(t); }
          if (b->vsamp[u] != ENG_PTR(sm)) { [enc setVertexSamplerState:sm atIndex:MTL_VSAMP_INDEX(u)]; b->vsamp[u] = ENG_PTR(sm); }
      }
@@ -19642,7 +19927,7 @@ index 98db2857..3824ab79 100644
      /* An indexed draw is really indexed here: the index buffer is what keeps a
       * strip's shared vertices from being fetched and uploaded per triangle.
       * Only a rebuilt triangle list is ever indexed; points and lines arrive as
-@@ -3182,7 +5320,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3182,7 +5558,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
                return;
            }
        } }
@@ -19658,7 +19943,7 @@ index 98db2857..3824ab79 100644
          [enc drawIndexedPrimitives:r->topology
                          indexCount:r->index_count
                           indexType:MTLIndexTypeUInt32
-@@ -3201,26 +5346,121 @@ static int eng_record_targets_are(const EngRecord* r, const u32* rt, u32 nrt)
+@@ -3201,26 +5584,122 @@ static int eng_record_targets_are(const EngRecord* r, const u32* rt, u32 nrt)
      return 1;
  }
  
@@ -19706,6 +19991,7 @@ index 98db2857..3824ab79 100644
 +static u32 s_ft_passes, s_ft_resolves, s_ft_copies;   /* PS3_FTRACE: per command buffer */
  static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
  {
++    eng_par_wait_records(s_enc_rec, s_enc_count);   /* PS3_SHADER_PARALLEL: no draw is skipped */
      u32 i = 0;
 -    while (i < s_eng_rec_count) {
 -        if (s_eng_rec[i].kind == ENG_REC_COLOR_COPY) {
@@ -19785,7 +20071,7 @@ index 98db2857..3824ab79 100644
              id<MTLTexture> src = eng_obj(r->depth);
              id<MTLTexture> dst = eng_obj(r->resolve_dst);
              id<MTLRenderPipelineState> pso = r->clear_flags ? s_eng_depth_rgba_pso : s_eng_depth_pso;
-@@ -3231,8 +5471,20 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3231,8 +5710,20 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
              rp.colorAttachments[0].storeAction = MTLStoreActionStore;
              id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
              if (!e) continue;
@@ -19806,7 +20092,7 @@ index 98db2857..3824ab79 100644
              [e setFragmentSamplerState:s_eng_point_sampler atIndex:0];
              [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
              [e endEncoding];
-@@ -3243,6 +5495,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3243,6 +5734,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * surface and an MRT set arrives as one clear per target, so they are
           * collected rather than compared: they become load actions on the
           * pass below when the draw that follows writes the same targets. */
@@ -19814,7 +20100,7 @@ index 98db2857..3824ab79 100644
          u32 n_cc = 0;
          u32 cc_surf[RSX_BE_MAX_COLOR_TARGETS];
          float cc_rgba[RSX_BE_MAX_COLOR_TARGETS][4];
-@@ -3250,10 +5503,12 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3250,10 +5742,12 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
          u32 cd = 0, ds_flags = 0;
          float cdepth = 1.0f;
          u8 cstencil = 0;
@@ -19831,7 +20117,7 @@ index 98db2857..3824ab79 100644
              if (r->kind == ENG_REC_CLEAR_COLOR) {
                  u32 k = 0;
                  while (k < n_cc && cc_surf[k] != r->rt[0]) k++;
-@@ -3281,9 +5536,10 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3281,9 +5775,10 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
          u32 nrt = n_cc;
          for (u32 k = 0; k < n_cc; k++) rt[k] = cc_surf[k];
          u32 depth = have_clear_ds ? cd : 0;
@@ -19845,7 +20131,7 @@ index 98db2857..3824ab79 100644
              int covered = 1;
              for (u32 k = 0; k < n_cc && covered; k++) {
                  int found = 0;
-@@ -3292,12 +5548,23 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3292,12 +5787,23 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
                  covered = found;
              }
              if (covered) {
@@ -19869,7 +20155,7 @@ index 98db2857..3824ab79 100644
          /* Metal wants every attachment the same size, and the engine registers
           * an MRT set's members at target A's, so a set whose members disagree
           * is one this frame cannot honour: it stops at the gap, as the vtable
-@@ -3312,7 +5579,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3312,7 +5818,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
              tex[attach++] = t;
          }
          id<MTLTexture> zbuf = eng_obj(depth);
@@ -19878,7 +20164,7 @@ index 98db2857..3824ab79 100644
          /* A pipeline always declares the depth attachment, so a draw pass
           * always has to have one; the display's shared buffer is the fallback
           * for a guest that never declared a zeta. */
-@@ -3359,33 +5626,256 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3359,33 +5865,256 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * skips those draws rather than encoding a mismatch. */
          if (!enc || attach != nrt) {
              if (enc) [enc endEncoding];
@@ -20144,7 +20430,7 @@ index 98db2857..3824ab79 100644
          pd.colorAttachments[0].pixelFormat = [dst pixelFormat];
          NSError* err = nil;
          s_eng_blit_pso = [s_dev newRenderPipelineStateWithDescriptor:pd error:&err];
-@@ -3404,9 +5894,31 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
+@@ -3404,9 +6133,31 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
      if (!e) return;
      [e setRenderPipelineState:s_eng_blit_pso];
      [e setFragmentTexture:src atIndex:0];
@@ -20177,7 +20463,7 @@ index 98db2857..3824ab79 100644
  }
  
  /* Encode everything recorded so far and commit it.
-@@ -3437,50 +5949,88 @@ static void eng_pt_report(void)
+@@ -3437,50 +6188,88 @@ static void eng_pt_report(void)
      if (!t0) t0 = now;
      if (now - t0 < 10000000000ull) return;
      fprintf(stderr, "[rsx present] %u presents: in-flight wait %.0f ms, nextDrawable %.0f ms,"
@@ -20283,7 +20569,7 @@ index 98db2857..3824ab79 100644
                      fprintf(stderr, "[pass] %5u x%-4u kind=%d rt=", i, j - i, (int)r->kind);
                      for (u32 k = 0; k < r->nrt; k++) fprintf(stderr, "%s%u", k ? "," : "", r->rt[k]);
                      fprintf(stderr, " depth=%u", r->depth);
-@@ -3498,19 +6048,51 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3498,19 +6287,51 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
                      i = j;
                  }
              }
@@ -20339,7 +20625,7 @@ index 98db2857..3824ab79 100644
                  if (busy) __atomic_store_n(busy, 0, __ATOMIC_RELEASE);
                  dispatch_semaphore_signal(sem);
              }];
-@@ -3518,39 +6100,155 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3518,39 +6339,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
              s_pt_ns[3] += eng_pt_now() - pt;
              s_pt_n++;
              eng_pt_report();
@@ -20356,6 +20642,17 @@ index 98db2857..3824ab79 100644
 +                            s_sc_async_skipped - last_skipped,
 +                            __atomic_load_n(&s_sc_async_pending, __ATOMIC_RELAXED));
 +                    last_skipped = s_sc_async_skipped; } }
++            /* PS3_SHADER_PARALLEL: builds handed to the pool, and how long
++             * encoding waited for them. */
++            if (s_par_workers) { static u32 n, last_jobs;
++                if (++n % 1800 == 0 && s_par_jobs != last_jobs) {
++                    pthread_mutex_lock(&s_par_mu);
++                    fprintf(stderr, "[shader cache] parallel: %u pipeline build(s) so far on %u worker(s);"
++                                    " encoding waited %u time(s), %.0f ms in all; %u draw(s) dropped"
++                                    " (a pipeline that did not build)\n",
++                            s_par_jobs, s_par_workers, s_par_waits, s_par_wait_ms, s_sc_async_skipped);
++                    last_jobs = s_par_jobs;
++                    pthread_mutex_unlock(&s_par_mu); } }
          } else {
 +            const u64 ft_w0 = PS3_FT_ON() ? eng_pt_now() : 0;
              [cb commit];
@@ -20433,7 +20730,7 @@ index 98db2857..3824ab79 100644
 +        s_enc_queue = dispatch_queue_create("ps3recomp.metal.encode", at);
 +        s_enc_idle = dispatch_semaphore_create(1);
 +        if (!s_enc_queue || !s_enc_idle) { __atomic_store_n(&s_enc_thread, 0, __ATOMIC_RELAXED); return 0; }
-+    }
+     }
 +    return 1;
 +}
 +
@@ -20471,7 +20768,7 @@ index 98db2857..3824ab79 100644
 +        });
 +        eng_submission_done_here();
 +        return;
-     }
++    }
 +    eng_enc_join();
 +    if (!eng_encode_commit_body(present_dst, s_eng_rec, s_eng_rec_count, s_eng_slot,
 +                                s_eng_stage_used, s_eng_bars_next, 0))
@@ -20507,7 +20804,7 @@ index 98db2857..3824ab79 100644
          id<MTLCommandBuffer> fence = [s_queue commandBuffer];
          [fence commit];
          [fence waitUntilCompleted];
-@@ -3580,7 +6278,11 @@ static void eng_dump_frame(id<MTLTexture> src)
+@@ -3580,7 +6528,11 @@ static void eng_dump_frame(id<MTLTexture> src)
              fwrite(rgb, 1, 3, f);
          }
          fclose(f);
@@ -20520,7 +20817,7 @@ index 98db2857..3824ab79 100644
      }
      free(rgba);
  }
-@@ -3596,14 +6298,31 @@ static float eng_half_to_float(uint16_t h)
+@@ -3596,14 +6548,31 @@ static float eng_half_to_float(uint16_t h)
      else f = (s << 31) | ((e + 112) << 23) | (m << 13);
      float r; memcpy(&r, &f, 4); return r;
  }
@@ -20554,7 +20851,7 @@ index 98db2857..3824ab79 100644
      for (u32 h = 1; h <= s_eng_obj_count; ++h) {
          id<MTLTexture> t = s_eng_obj[h - 1];
          /* PS3RECOMP_METAL_SURF_DUMP_EXTRA=h,h,...: also dump these handles even if
-@@ -3659,6 +6378,26 @@ static void eng_dump_surfaces(void)
+@@ -3659,6 +6628,26 @@ static void eng_dump_surfaces(void)
              }
              fclose(f);
          }
@@ -20581,7 +20878,7 @@ index 98db2857..3824ab79 100644
          free(px);
      }
      fprintf(stderr, "[rsx engine/metal] dumped render targets for frame %u to %s\n", frame, dir);
-@@ -3671,17 +6410,67 @@ static void eng_present(void* user, u32 surface)
+@@ -3671,17 +6660,67 @@ static void eng_present(void* user, u32 surface)
      if (!src) { eng_encode_and_commit(nil); return; }
      const u32 nrec = s_eng_rec_count;
      eng_encode_and_commit(src);
@@ -20651,7 +20948,7 @@ index 98db2857..3824ab79 100644
      if ([t storageMode] != MTLStorageModePrivate) {
          [t getBytes:out bytesPerRow:out_pitch
           fromRegion:MTLRegionMake2D(x, y, w, h) mipmapLevel:0];
-@@ -3705,14 +6494,101 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3705,14 +6744,101 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
          memcpy((u8*)out + (size_t)row * out_pitch, src + (size_t)row * w * bpp, (size_t)w * bpp);
  }
  
@@ -20753,7 +21050,7 @@ index 98db2857..3824ab79 100644
      .color_target_create  = eng_color_target_create,
      .color_target_release = eng_obj_release,
      .surface_view         = eng_surface_view,
-@@ -3721,6 +6597,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3721,6 +6847,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .depth_snapshot       = eng_depth_snapshot,
      .color_snapshot       = eng_color_snapshot,
      .depth_snapshot_rgba8 = eng_depth_snapshot_rgba8,
@@ -20762,7 +21059,7 @@ index 98db2857..3824ab79 100644
      .pipeline_create      = eng_pipeline_create,
      .pipeline_release     = eng_pipeline_release,
      .bind_targets         = eng_bind_targets,
-@@ -3733,7 +6611,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3733,7 +6861,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .set_viewport         = eng_set_viewport,
      .set_scissor          = eng_set_scissor,
      .set_stencil_ref      = eng_set_stencil_ref,
@@ -20777,7 +21074,7 @@ index 98db2857..3824ab79 100644
      .clear_color          = eng_clear_color,
      .clear_depth_stencil  = eng_clear_depth_stencil,
      .present              = eng_present,
-@@ -3750,12 +6635,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3750,12 +6885,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  
          const char* hl = getenv("PS3RECOMP_METAL_HEADLESS");
          s_headless = (hl && *hl && *hl != '0');
@@ -20795,7 +21092,7 @@ index 98db2857..3824ab79 100644
          s_queue = [s_dev newCommandQueue];
          if (!s_queue) {
              fprintf(stderr, "[RSX metal] could not create command queue\n");
-@@ -3822,9 +6712,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3822,9 +6962,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
          if (rsx_draw_engine_enabled() &&
              rsx_draw_engine_init(s_width, s_height) == 0) {
              s_eng_active = 1;
@@ -20818,7 +21115,7 @@ index 98db2857..3824ab79 100644
          fprintf(stderr, "[RSX metal] %s on %s (%ux%u), guest shaders %s, %s path\n",
                  s_headless ? "headless" : "windowed",
                  [[s_dev name] UTF8String], s_width, s_height,
-@@ -3837,6 +6740,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3837,6 +6990,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  void rsx_metal_backend_shutdown(void)
  {
      @autoreleasepool {
@@ -20826,7 +21123,7 @@ index 98db2857..3824ab79 100644
          if (s_ready) rsx_set_backend(NULL);
          if (s_eng_active) rsx_draw_engine_shutdown();
          rsx_draw_engine_set_backend(NULL);
-@@ -3853,6 +6757,12 @@ void rsx_metal_backend_shutdown(void)
+@@ -3853,6 +7007,12 @@ void rsx_metal_backend_shutdown(void)
              s_inflight = nil;
          }
  #if !TARGET_OS_IPHONE
@@ -20839,7 +21136,7 @@ index 98db2857..3824ab79 100644
          if (s_window) { [s_window close]; s_window = nil; }
  #endif
          free(s_verts); s_verts = NULL;
-@@ -3886,25 +6796,180 @@ static int pump_messages_impl(void)
+@@ -3886,25 +7046,180 @@ static int pump_messages_impl(void)
                                                  inMode:NSDefaultRunLoopMode
                                                 dequeue:YES];
              if (!ev) break;
@@ -21024,7 +21321,7 @@ index 98db2857..3824ab79 100644
      }
  #endif
      return s_closed ? -1 : 0;
-@@ -4010,8 +7075,9 @@ void rsx_metal_backend_present(void)
+@@ -4010,8 +7325,9 @@ void rsx_metal_backend_present(void)
              encode_draw(enc, &rec->u.draw, &ps);
          }
          if (enc) [enc endEncoding];
@@ -21035,7 +21332,7 @@ index 98db2857..3824ab79 100644
  
          if (s_headless) {
              /* The readback below must see a completed frame. */
-@@ -4068,3 +7134,121 @@ u32 rsx_metal_backend_guest_draws(void)
+@@ -4068,3 +7384,121 @@ u32 rsx_metal_backend_guest_draws(void)
  {
      return s_eng_active ? rsx_draw_engine_guest_draws() : s_last_guest_draws;
  }
@@ -25918,7 +26215,7 @@ index 89f3d8e3..d72176c6 100644
                          (void*)c, ((spu_context*)c)->image_id);
              __atomic_store_n(&s_coh_ctxs[i], NULL, __ATOMIC_RELEASE);
 diff --git a/runtime/spu/spu_context.h b/runtime/spu/spu_context.h
-index 53e07da9..7872a647 100644
+index 53e07da9..d67c9be1 100644
 --- a/runtime/spu/spu_context.h
 +++ b/runtime/spu/spu_context.h
 @@ -11,6 +11,7 @@
@@ -26022,7 +26319,50 @@ index 53e07da9..7872a647 100644
  {
      lsa &= SPU_LS_MASK & ~0xFu;
      uint8_t* p = &ctx->ls[lsa];
-@@ -1043,6 +1076,35 @@ static inline void spu_pchist_tick(const spu_context* ctx)
+@@ -697,6 +730,42 @@ static inline void spu_ls_write128(spu_context* ctx, uint32_t lsa, u128 val)
+     }
+ }
+ 
++/* spu_ls_read128_lean / spu_ls_write128_lean (what spu_lifter.py emits by default;
++ * SPU_LIFT_LEAN_LS=0 = the two above): the same accesses, the same debug hooks in the
++ * same order, with the four 32-bit byte swaps done as one 128-bit load or store and one
++ * REV32 (clang turned the four memcpy + bswap into LD2 + three shuffles + REV64 for a load).
++ * The value is the same bit for bit: SPU word i = big-endian bytes 4i..4i+3 at host word i.
++ * tests/test_spu_ls_lean.c checks both against the forms above. */
++#if defined(__ARM_NEON) && !defined(SPU_SCALAR_HELPERS)
++#include <arm_neon.h>
++static inline __attribute__((always_inline)) u128 spu_ls_read128_lean(const spu_context* ctx, uint32_t lsa)
++{
++    if (__builtin_expect(g_spu_ls_dbg != 0, 0)) {
++        spu_ls_read_probe(ctx, lsa);
++        spu_ls_watch_hit2(ctx, lsa & (SPU_LS_MASK & ~0xFu), 0, &ctx->ls[lsa & (SPU_LS_MASK & ~0xFu)],
++                          (uint32_t)ctx->pc & SPU_LS_MASK, ctx->gpr[0]._u32[0] & SPU_LS_MASK);
++    }
++    u128 v;
++    vst1q_u8(v._u8, vrev32q_u8(vld1q_u8(&ctx->ls[lsa & (SPU_LS_MASK & ~0xFu)])));
++    return v;
++}
++/* With a debug hook armed, the whole store out of line: spu_ls_write128 itself, so the
++ * hooks run in the same order around the same store. One test of g_spu_ls_dbg per store
++ * instead of two (the second had to reload it after the byte store). */
++static __attribute__((noinline, cold)) void spu_ls_write128_dbg(spu_context* ctx, uint32_t lsa, u128 val)
++{
++    spu_ls_write128(ctx, lsa, val);
++}
++static inline __attribute__((always_inline)) void spu_ls_write128_lean(spu_context* ctx, uint32_t lsa, u128 val)
++{
++    if (__builtin_expect(g_spu_ls_dbg != 0, 0)) { spu_ls_write128_dbg(ctx, lsa, val); return; }
++    vst1q_u8(&ctx->ls[lsa & (SPU_LS_MASK & ~0xFu)], vrev32q_u8(vld1q_u8(val._u8)));
++}
++#else
++#define spu_ls_read128_lean  spu_ls_read128
++#define spu_ls_write128_lean spu_ls_write128
++#endif
++
+ /* ---------------------------------------------------------------------------
+  * Preferred slot extraction
+  *
+@@ -1043,6 +1112,52 @@ static inline void spu_pchist_tick(const spu_context* ctx)
   * brsl/bisl frame is live (host_depth>0); at 0 the frame was destroyed (task
   * resume / restack unwind) so dispatch to the link register instead -- faithful
   * to CBEA `bi` (branch to word 0 of RA). pc set unconditionally. */
@@ -26054,6 +26394,23 @@ index 53e07da9..7872a647 100644
 +        g_spu_trampoline_fn = FN;                                            \
 +        return;                                                              \
 +    } while (0)
++
++/* SPU_CHUNK_GATE_OK: a transfer between two chunks of one merged lifted
++ * function (spu_lifter.py, SPU_LIFT_MERGE_CHUNKS=1). Where the chunks used to
++ * be separate functions it was a SPU_DIRECT; this makes the same checks with
++ * the same outcome. The lifter emits
++ *   if (!SPU_CHUNK_GATE_OK(ctx, PC)) { g_spu_trampoline_fn = FN; return; }
++ * -- the trampoline and a return when the drain has work at PC, as SPU_DIRECT
++ * did -- and otherwise goes on to the code at PC in the same function, which is
++ * the code FN runs. Sets ctx->pc to PC either way, as SPU_DIRECT did. */
++static inline __attribute__((always_inline)) int spu_chunk_gate_ok(struct spu_context* ctx, uint32_t pc)
++{
++    ctx->pc = pc;
++    return __builtin_expect(g_spu_direct > 0, 1) && (pc & SPU_LS_MASK) &&
++           !g_spu_stack_reset_hint[(pc >> 2) & 1023u] &&
++           !(ctx->int_enable && !ctx->irq_saved && (spu_ev_get(ctx) & ctx->event_mask));
++}
++#define SPU_CHUNK_GATE_OK(ctx, PC) spu_chunk_gate_ok((ctx), (uint32_t)(PC))
 +
  #define SPU_RET(ctx) do {                                      \
          (ctx)->pc = (ctx)->gpr[0]._u32[0];                     \
@@ -26860,10 +27217,39 @@ index 7c1089c2..b081b43e 100644
                              (unsigned)(return_pc & SPU_LS_MASK), pc, ctx->image_id, ctx->host_depth,
                              (int)ctx->resident_ovl); }
 diff --git a/runtime/spu/spu_helpers.h b/runtime/spu/spu_helpers.h
-index 8d967680..eacd8e99 100644
+index 8d967680..8fd4a507 100644
 --- a/runtime/spu/spu_helpers.h
 +++ b/runtime/spu/spu_helpers.h
-@@ -858,6 +858,130 @@ SPU__SF_V2(spu_fcmgt, spu__sf_mag(x) >  spu__sf_mag(y) ? 0xFFFFFFFFu : 0u)
+@@ -453,6 +453,28 @@ static inline u128 spu_shufb(u128 a, u128 b, u128 c) {
+ #define spu_shufb_ref spu_shufb
+ #endif
+ 
++/* spu_shufb_lean (what spu_lifter.py emits by default; SPU_LIFT_LEAN_SHUFB=0 = spu_shufb):
++ * bit-identical to spu_shufb with no byte reversals. SPU byte P is host byte P^3 in a, b, c
++ * and the result alike, so the result's host byte h takes the control at host byte h, and
++ * concat SPU byte s (s < 32) is table byte s^3 of the host-order {a, b} pair (the xor leaves
++ * bit 4, the a/b choice, alone). Controls 0x80..0xFF: masked with 0x9F the index stays >= 0x80,
++ * out of TBL's range, so the lookup gives 0; then 0xC0..0xDF or in 0xFF and 0xE0..0xFF 0x80:
++ * (C >= 0xC0 ? 0xFF : 0) ^ (C >= 0xE0 ? 0x7F : 0). tests/test_spu_shufb_lean.c checks it. */
++#if defined(__ARM_NEON) && !defined(SPU_SCALAR_HELPERS)
++static inline __attribute__((always_inline)) u128 spu_shufb_lean(u128 a, u128 b, u128 c) {
++    uint8x16x2_t t;
++    t.val[0] = vld1q_u8(a._u8);
++    t.val[1] = vld1q_u8(b._u8);
++    const uint8x16_t C = vld1q_u8(c._u8);
++    const uint8x16_t r = vqtbl2q_u8(t, veorq_u8(vandq_u8(C, vdupq_n_u8(0x9F)), vdupq_n_u8(3)));
++    const uint8x16_t sp = veorq_u8(vcgeq_u8(C, vdupq_n_u8(0xC0)),
++                                   vandq_u8(vcgeq_u8(C, vdupq_n_u8(0xE0)), vdupq_n_u8(0x7F)));
++    u128 out; vst1q_u8(out._u8, vorrq_u8(r, sp)); return out;
++}
++#else
++#define spu_shufb_lean spu_shufb
++#endif
++
+ /* ---- shift / rotate immediate (word lanes) ---- */
+ static inline u128 spu_shli(u128 a, int sh)  { u128 r; sh&=0x3F; for(int i=0;i<4;i++) r._u32[i]=(sh>31)?0:(a._u32[i]<<sh); return r; }
+ static inline u128 spu_shlhi(u128 a, int sh) { u128 r; sh&=0x1F; for(int i=0;i<8;i++) r._u16[i]=(sh>15)?0:(uint16_t)(a._u16[i]<<sh); return r; }
+@@ -858,6 +880,130 @@ SPU__SF_V2(spu_fcmgt, spu__sf_mag(x) >  spu__sf_mag(y) ? 0xFFFFFFFFu : 0u)
  #undef SPU__SF_V2
  #undef SPU__SF_V3
  
@@ -26994,7 +27380,7 @@ index 8d967680..eacd8e99 100644
  /* cflts / cfltu: value * 2^(173 - i8), truncated toward zero, saturating to the integer range.
   * csflt / cuflt: integer / 2^(155 - i8) as an extended-range single (truncated). The ISA leaves
   * scales outside 0..127 undefined; these compute the same formula for them. */
-@@ -874,8 +998,42 @@ static inline uint32_t spu__cfl_lane(uint32_t x, int scale, int is_unsigned) {
+@@ -874,8 +1020,42 @@ static inline uint32_t spu__cfl_lane(uint32_t x, int scale, int is_unsigned) {
      const uint32_t v = sh >= 0 ? m << sh : (sh <= -24 ? 0 : m >> -sh);
      return neg ? 0u - v : v;
  }
@@ -27039,7 +27425,7 @@ index 8d967680..eacd8e99 100644
  static inline u128 spu_csflt(u128 a, int i8) { u128 r; for (int i = 0; i < 4; i++) { const int32_t v = a._s32[i];
      r._u32[i] = v ? spu__sf_pack(v < 0 ? 0x80000000u : 0, v < 0 ? 0u - (uint32_t)v : (uint32_t)v, -(155 - (i8 & 0xFF))) : 0; } return r; }
  static inline u128 spu_cuflt(u128 a, int i8) { u128 r; for (int i = 0; i < 4; i++) { const uint32_t v = a._u32[i];
-@@ -898,7 +1056,7 @@ static inline u128 spu_cuflt(u128 a, int i8) { u128 r; for (int i = 0; i < 4; i+
+@@ -898,7 +1078,7 @@ static inline u128 spu_cuflt(u128 a, int i8) { u128 r; for (int i = 0; i < 4; i+
   * exponent-0 estimate is a zero operand, and a result whose exponent would
   * drop below 1 underflows -- both give +0, the only zero the SPU produces.
   * Exponent 255 is ordinary extended range, so 1/0 stays at the top of it. */
@@ -27048,7 +27434,7 @@ index 8d967680..eacd8e99 100644
      u128 r;
      for (int i = 0; i < 4; i++) {
          const uint32_t est = b._u32[i];
-@@ -920,6 +1078,37 @@ static inline u128 spu_fi(u128 a, u128 b) {
+@@ -920,6 +1100,37 @@ static inline u128 spu_fi(u128 a, u128 b) {
      return r;
  }
  
@@ -27780,6 +28166,178 @@ index cb915585..339423c3 100644
      free(ctx);
  }
  
+diff --git a/runtime/spu/tests/test_spu_ls_lean.c b/runtime/spu/tests/test_spu_ls_lean.c
+new file mode 100644
+index 00000000..70814850
+--- /dev/null
++++ b/runtime/spu/tests/test_spu_ls_lean.c
+@@ -0,0 +1,96 @@
++/* spu_ls_read128_lean / spu_ls_write128_lean (what the lifter emits: one 128-bit access + REV32)
++ * must be bit-identical to spu_ls_read128 / spu_ls_write128: the same value for every load and
++ * the same local store after every store, at any address (unaligned, past 256 KB, wrapping) and
++ * with any contents. Build on arm64:
++ *   cc -O2 -fno-strict-aliasing -fwrapv -I.. -I../../../include test_spu_ls_lean.c -o t && ./t [N]
++ * -DPLANT_BUG swaps two bytes of the lean load at one address: the test must then fail. */
++#include "../spu_context.h"
++#include <stdio.h>
++#include <stdlib.h>
++
++/* the debug hooks' state and entry points (spu_channels.c in the runtime). The second pass arms
++ * them: every watch hit is hashed (address, kind, the 16 bytes it sees, pc, lr), and both forms
++ * must make the same hits in the same order. */
++int g_spu_ls_dbg = 0;
++int g_spu_ls_watch_n = 0;
++static uint64_t s_hook;
++void spu_ls_watch_slow(const struct spu_context* c, uint32_t lsa, int is_write, const uint8_t* p,
++                       uint32_t pc, uint32_t lr)
++{
++    (void)c;
++    uint64_t h = s_hook ^ lsa ^ ((uint64_t)is_write << 40) ^ ((uint64_t)pc << 20) ^ ((uint64_t)lr << 44);
++    for (int i = 0; i < 16; i++) h = (h ^ p[i]) * 0x100000001B3ull;
++    s_hook = h * 0x9E3779B97F4A7C15ull;
++}
++
++static uint64_t s_rng = 0x853C49E6748FEA9Bull;
++static uint32_t rnd32(void) { s_rng ^= s_rng << 13; s_rng ^= s_rng >> 7; s_rng ^= s_rng << 17; return (uint32_t)(s_rng >> 16); }
++static uint32_t rnd_addr(void)
++{
++    switch (rnd32() % 4) {
++    case 0: return rnd32();                                   /* any 32-bit value: masked */
++    case 1: return (SPU_LS_SIZE - 16u) + (rnd32() & 31u);     /* the end of LS and past it */
++    case 2: return rnd32() & 0x3FFF0u;                        /* aligned */
++    default: return rnd32() & 0x3FFFFu;                       /* unaligned inside LS */
++    }
++}
++
++static u128 lean_read(const spu_context* c, uint32_t a)
++{
++    u128 v = spu_ls_read128_lean(c, a);
++#ifdef PLANT_BUG
++    if ((a & 0x3FFF0u) == 0x1230u) { uint8_t t = v._u8[0]; v._u8[0] = v._u8[1]; v._u8[1] = t; }
++#endif
++    return v;
++}
++
++int main(int argc, char** argv)
++{
++    const unsigned long long n = argc > 1 ? strtoull(argv[1], 0, 0) : 20000000ull;
++    static spu_context c1, c2;
++    uint8_t* ls1 = aligned_alloc(128, SPU_LS_SIZE); uint8_t* ls2 = aligned_alloc(128, SPU_LS_SIZE);
++    for (int i = 0; i < SPU_LS_SIZE; i++) ls1[i] = (uint8_t)rnd32();
++    memcpy(ls2, ls1, SPU_LS_SIZE);
++    c1.ls = ls1; c2.ls = ls2;
++    unsigned long long bad = 0, loads = 0, stores = 0;
++    /* every aligned line once, then random loads and stores interleaved */
++    for (uint32_t a = 0; a < SPU_LS_SIZE + 64u; a += 16) {
++        const u128 x = lean_read(&c1, a), y = spu_ls_read128(&c1, a); loads++;
++        if (memcmp(&x, &y, 16) && bad++ < 8) printf("LOAD MISMATCH at 0x%X\n", a);
++    }
++    for (unsigned long long it = 0; it < n; it++) {
++        const uint32_t a = rnd_addr();
++        if (rnd32() & 1) {
++            const u128 x = lean_read(&c1, a), y = spu_ls_read128(&c2, a); loads++;
++            if (memcmp(&x, &y, 16) && bad++ < 8) printf("LOAD MISMATCH at 0x%X\n", a);
++        } else {
++            u128 v; for (int i = 0; i < 4; i++) v._u32[i] = rnd32() ^ (rnd32() << 16);
++            spu_ls_write128_lean(&c1, a, v); spu_ls_write128(&c2, a, v); stores++;
++            const uint32_t l = a & (SPU_LS_MASK & ~0xFu);
++            if (memcmp(ls1 + l, ls2 + l, 16) && bad++ < 8) printf("STORE MISMATCH at 0x%X\n", a);
++        }
++    }
++    if (memcmp(ls1, ls2, SPU_LS_SIZE) && bad++ < 8) printf("LOCAL STORES DIFFER\n");
++    /* debug hooks armed: same values, same LS, same hook calls */
++    g_spu_ls_dbg = 1; g_spu_ls_watch_n = 1;
++    for (unsigned long long it = 0; it < n / 8; it++) {
++        const uint32_t a = rnd_addr();
++        c1.pc = c2.pc = rnd32(); c1.gpr[0]._u32[0] = c2.gpr[0]._u32[0] = rnd32();
++        uint64_t h1, h2;
++        if (rnd32() & 1) {
++            s_hook = 1; const u128 x = lean_read(&c1, a); h1 = s_hook;
++            s_hook = 1; const u128 y = spu_ls_read128(&c2, a); h2 = s_hook; loads++;
++            if ((memcmp(&x, &y, 16) || h1 != h2) && bad++ < 8) printf("DEBUG LOAD MISMATCH at 0x%X\n", a);
++        } else {
++            u128 v; for (int i = 0; i < 4; i++) v._u32[i] = rnd32() ^ (rnd32() << 16);
++            s_hook = 1; spu_ls_write128_lean(&c1, a, v); h1 = s_hook;
++            s_hook = 1; spu_ls_write128(&c2, a, v); h2 = s_hook; stores++;
++            const uint32_t l = a & (SPU_LS_MASK & ~0xFu);
++            if ((memcmp(ls1 + l, ls2 + l, 16) || h1 != h2) && bad++ < 8) printf("DEBUG STORE MISMATCH at 0x%X\n", a);
++        }
++    }
++    g_spu_ls_dbg = 0; g_spu_ls_watch_n = 0;
++    if (memcmp(ls1, ls2, SPU_LS_SIZE) && bad++ < 8) printf("LOCAL STORES DIFFER (debug pass)\n");
++    printf("test_spu_ls_lean: %llu loads, %llu stores, %llu mismatches\n", loads, stores, bad);
++    return bad != 0;
++}
+diff --git a/runtime/spu/tests/test_spu_shufb_lean.c b/runtime/spu/tests/test_spu_shufb_lean.c
+new file mode 100644
+index 00000000..062fff55
+--- /dev/null
++++ b/runtime/spu/tests/test_spu_shufb_lean.c
+@@ -0,0 +1,64 @@
++/* spu_shufb_lean (what the lifter emits, no byte reversals) must be bit-identical to spu_shufb
++ * and to the byte-loop reference spu_shufb_ref for every control byte in every position: all 256
++ * control values in all 16 positions against random and patterned a/b, then random triples.
++ * Build on arm64:
++ *   cc -O2 -fno-strict-aliasing -fwrapv -I.. -I../../../include test_spu_shufb_lean.c -o t && ./t [N]
++ * -DPLANT_BUG breaks the lean form for one control value (0xDF): the test must then fail. */
++#include "../spu_helpers.h"
++#include <stdio.h>
++#include <stdlib.h>
++
++static uint64_t s_rng = 0x2545F4914F6CDD1Dull;
++static uint8_t rnd8(void) { s_rng ^= s_rng << 13; s_rng ^= s_rng >> 7; s_rng ^= s_rng << 17; return (uint8_t)(s_rng >> 24); }
++
++static u128 lean(u128 a, u128 b, u128 c)
++{
++    u128 r = spu_shufb_lean(a, b, c);
++#ifdef PLANT_BUG
++    for (int i = 0; i < 16; i++) if (c._u8[i] == 0xDF) r._u8[i] ^= 1;
++#endif
++    return r;
++}
++
++static unsigned long long s_n, s_bad;
++static void check(u128 a, u128 b, u128 c)
++{
++    const u128 x = lean(a, b, c), y = spu_shufb_ref(a, b, c), z = spu_shufb(a, b, c);
++    s_n++;
++    if ((memcmp(&x, &y, 16) || memcmp(&z, &y, 16)) && s_bad++ < 8) {
++        printf("MISMATCH c=");
++        for (int i = 0; i < 16; i++) printf("%02X", c._u8[i]);
++        printf(" lean=%08X%08X%08X%08X ref=%08X%08X%08X%08X\n", x._u32[0], x._u32[1], x._u32[2], x._u32[3],
++               y._u32[0], y._u32[1], y._u32[2], y._u32[3]);
++    }
++}
++
++int main(int argc, char** argv)
++{
++    const unsigned long long n = argc > 1 ? strtoull(argv[1], 0, 0) : 20000000ull;
++    u128 a, b, c;
++    /* every control value in every position: byte i of c = k + 37 i, k = 0..255, with
++     * random sources and with sources that name their own byte (a = 0..15, b = 16..31) */
++    for (int rep = 0; rep < 64; rep++)
++        for (int k = 0; k < 256; k++) {
++            for (int i = 0; i < 16; i++) {
++                c._u8[i] = (uint8_t)(k + 37 * i);
++                a._u8[i] = rep ? rnd8() : (uint8_t)i;
++                b._u8[i] = rep ? rnd8() : (uint8_t)(16 + i);
++            }
++            check(a, b, c);
++        }
++    /* random triples, controls biased to the 0x00..0x1F selectors and the specials' edges */
++    static const uint8_t edge[] = { 0x00, 0x0F, 0x10, 0x1F, 0x20, 0x3F, 0x60, 0x7F, 0x80, 0x9F,
++                                    0xA0, 0xBF, 0xC0, 0xDF, 0xE0, 0xFF };
++    for (unsigned long long it = 0; it < n; it++) {
++        for (int i = 0; i < 16; i++) {
++            a._u8[i] = rnd8(); b._u8[i] = rnd8();
++            const uint8_t r = rnd8();
++            c._u8[i] = (r & 3) == 0 ? edge[r >> 4] : (r & 3) == 1 ? (uint8_t)(rnd8() & 0x1F) : rnd8();
++        }
++        check(a, b, c);
++    }
++    printf("test_spu_shufb_lean: %llu vectors, %llu mismatches\n", s_n, s_bad);
++    return s_bad != 0;
++}
 diff --git a/runtime/syscalls/lv2_register.c b/runtime/syscalls/lv2_register.c
 index d756b8d6..44bd1fdf 100644
 --- a/runtime/syscalls/lv2_register.c
@@ -104403,10 +104961,10 @@ index ab59cbee..cf8907c3 100644
                  # right after another branch (fallthrough entry)
                  while k > 0 and seg[k].addr not in targets and not _ends_block(seg[k - 1]):
 diff --git a/tools/spu_lifter.py b/tools/spu_lifter.py
-index 00b771d5..e4bb3b31 100644
+index 00b771d5..ab591178 100644
 --- a/tools/spu_lifter.py
 +++ b/tools/spu_lifter.py
-@@ -493,13 +493,202 @@ def compute_link_returns(insns, bounds) -> set:
+@@ -493,13 +493,225 @@ def compute_link_returns(insns, bounds) -> set:
      return returns
  
  
@@ -104437,8 +104995,8 @@ index 00b771d5..e4bb3b31 100644
 +# and for a later pass with liveness across functions.
 +_RL_GPR = re.compile(r'ctx->gpr\[(\d+)\]')
 +_RL_DEF = re.compile(r'ctx->gpr\[(\d+)\] =(?!=)')
-+_RL_LABEL = re.compile(r'^(loc_[0-9A-F]+):$')
-+_RL_GOTO = re.compile(r'^goto (loc_[0-9A-F]+);$')
++_RL_LABEL = re.compile(r'^(loc_(?:g_)?[0-9A-F]+):$')
++_RL_GOTO = re.compile(r'^goto (loc_(?:g_)?[0-9A-F]+);$')
 +_RL_LINK = re.compile(r'^(ctx->gpr\[\d+\] = spu_link\([^;]*\);) (.+)$')
 +_RL_EXIT_END = re.compile(r'(return;|SPU_DIRECT\([^;]*\);|SPU_RET\(ctx\);|'
 +                          r'SPU_RET_REG\(ctx, \d+\);)\s*\}?$')
@@ -104448,7 +105006,8 @@ index 00b771d5..e4bb3b31 100644
 +    """s touches ctx only through ctx->gpr[n], the inline LS accessors and
 +    ctx->code_base (none of which reads the register file)."""
 +    t = _RL_GPR.sub('', s)
-+    for k in ('spu_ls_read128(ctx,', 'spu_ls_write128(ctx,', 'ctx->code_base'):
++    for k in ('spu_ls_read128(ctx,', 'spu_ls_write128(ctx,', 'spu_ls_read128_lean(ctx,',
++              'spu_ls_write128_lean(ctx,', 'SPU_CHUNK_GATE_OK(ctx,', 'ctx->code_base'):
 +        t = t.replace(k, '')
 +    return 'ctx' not in t and 'g_spu_' not in t and 'spu_unsupported' not in t
 +
@@ -104590,6 +105149,25 @@ index 00b771d5..e4bb3b31 100644
 +def _lean_float_default() -> bool:
 +    return os.environ.get("SPU_LIFT_LEAN_FLOAT", "1") != "0"
 +
++
++# Gated chunk merge for lifts without --merge-chunks, opt-in (SPU_LIFT_MERGE_CHUNKS=1): bit-exact
++# on the equivalence harness, but no measurable gain in inFAMOUS 2 (2026-11-12, live A/B by cycles
++# per frame), so the default stays one C function per chunk.
++def _merge_chunks_default() -> bool:
++    return os.environ.get("SPU_LIFT_MERGE_CHUNKS", "0") == "1"
++
++
++# shufb lifted to spu_shufb_lean (spu_helpers.h: no byte reversals, bit-identical);
++# SPU_LIFT_LEAN_SHUFB=0 = spu_shufb.
++def _lean_shufb_default() -> bool:
++    return os.environ.get("SPU_LIFT_LEAN_SHUFB", "1") != "0"
++
++
++# Quadword LS loads/stores lifted to spu_ls_{read,write}128_lean (spu_context.h: one
++# 128-bit access + REV32, bit-identical); SPU_LIFT_LEAN_LS=0 = spu_ls_{read,write}128.
++def _lean_ls_default() -> bool:
++    return os.environ.get("SPU_LIFT_LEAN_LS", "1") != "0"
++
  
  # lv2 stop-and-signal syscalls that resume at the next instruction (the same
  # set as find_spu_functions.LV2_RESUMING_STOPS, which decides function extents).
@@ -104603,6 +105181,9 @@ index 00b771d5..e4bb3b31 100644
 +        # --reg-locals; never with --trace (its hooks read ctx->gpr).
 +        self.reg_locals = (_reg_locals_default() if reg_locals is None else reg_locals) and not trace
 +        self.lean_float = _lean_float_default() if lean_float is None else lean_float
++        self.lean_shufb = _lean_shufb_default()
++        _ls = "_lean" if _lean_ls_default() else ""
++        self.ls_rd, self.ls_wr = f"spu_ls_read128{_ls}", f"spu_ls_write128{_ls}"
 +        # --relocatable: the image is lifted at LS 0 and runs wherever it is
 +        # loaded; every LS address derived from its own position adds
 +        # ctx->code_base (spu_overlay_register_region_reloc).
@@ -104610,20 +105191,103 @@ index 00b771d5..e4bb3b31 100644
          self.functions: list[LiftedFunction] = []
          self.call_targets: set[int] = set()
          self.branch_targets: set[int] = set()
-@@ -572,8 +761,7 @@ class SPULifter:
-                          and (last_insn.raw & 0x3FFF) in LV2_RESUMING_STOPS))
+@@ -532,9 +744,14 @@ class SPULifter:
+ 
+     # ------------------------------------------------------------------ #
+     def lift_function(self, insns: list[SPUInstruction],
+-                      start: int, end: int) -> LiftedFunction:
++                      start: int, end: int, chunks=None) -> LiftedFunction:
++        """chunks: for a gated merged group (SPU_LIFT_MERGE_CHUNKS), the original
++        [(start, end)] chunks it spans; every transfer between two of them keeps the
++        checks SPU_DIRECT made there (SPU_CHUNK_GATE_OK), so only the call is saved."""
+         func = LiftedFunction(name=f"{self.prefix}spu_func_{start:08X}",
+                               start_addr=start, end_addr=end)
++        self._chunks = chunks if chunks and len(chunks) > 1 else None
++        self._gate_stubs = set()
+ 
+         internal: set[int] = set()
+         for insn in insns:
+@@ -545,9 +762,13 @@ class SPULifter:
+                 internal.add(tgt)
+ 
+         last_insn = None
++        cstarts = {c for c, _ in self._chunks[1:]} if self._chunks else set()
+         for insn in insns:
+             if insn.addr < start or insn.addr >= end:
+                 continue
++            if insn.addr in cstarts and self._falls_through(last_insn):
++                # the fall-through from the previous chunk: what its SPU_DIRECT checked
++                func.body_lines.append(f"    {self._gate(insn.addr)}")
+             if insn.addr in internal:
+                 func.body_lines.append(f"loc_{insn.addr:08X}:")
+             c = self._translate(insn, func)
+@@ -565,15 +786,20 @@ class SPULifter:
+         # conditional branch whose not-taken path continues), execution proceeds
+         # into the next sequential function. Emit a tail-call so the chain isn't
+         # truncated (this was silently dropping execution mid-job).
+-        _TERMINATORS = {"br", "bra", "bi", "iret", "stop", "stopd"}
+-        if (last_insn is not None
+-                and (last_insn.mnemonic not in _TERMINATORS
+-                     or (last_insn.mnemonic == "stop"
+-                         and (last_insn.raw & 0x3FFF) in LV2_RESUMING_STOPS))
++        if (self._falls_through(last_insn)
                  and end in getattr(self, "func_starts", set())):
              func.body_lines.append(
 -                f"    {{ ctx->pc = 0x{end:X}; "
 -                f"g_spu_trampoline_fn = {self.prefix}spu_func_{end:08X}; return; }}")
 +                f"    {{ SPU_DIRECT(ctx, {self._A(end)}, {self.prefix}spu_func_{end:08X}); }}")
++
++        # The cross-chunk jumps of a gated merged group go through one stub per
++        # target: the checks of the SPU_DIRECT that jump was, then the code there.
++        if self._gate_stubs:
++            func.body_lines.append("    return;")
++            for t in sorted(self._gate_stubs):
++                func.body_lines.append(f"loc_g_{t:08X}:")
++                func.body_lines.append(f"    {self._gate(t)}")
++                func.body_lines.append(f"    goto loc_{t:08X};")
++            self._gate_stubs = set()
  
          # Infinite no-op self-loop (the SPU `br .` halt idiom): a function whose
          # whole body is nops + an unconditional branch back into itself does
-@@ -596,6 +784,16 @@ class SPULifter:
+@@ -593,9 +819,51 @@ class SPULifter:
+                     "    spu_halt(ctx); return;",
+                 ]
+ 
++        self._chunks = None
          self.functions.append(func)
          return func
  
++    @staticmethod
++    def _falls_through(last_insn) -> bool:
++        """The last instruction of a chunk does not end its block unconditionally."""
++        _TERMINATORS = {"br", "bra", "bi", "iret", "stop", "stopd"}
++        return (last_insn is not None
++                and (last_insn.mnemonic not in _TERMINATORS
++                     or (last_insn.mnemonic == "stop"
++                         and (last_insn.raw & 0x3FFF) in LV2_RESUMING_STOPS)))
++
++    def _gate(self, tgt: int) -> str:
++        """SPU_DIRECT's checks for a transfer to tgt (spu_context.h, SPU_CHUNK_GATE_OK):
++        the trampoline and a return when the drain has work there, else go on."""
++        return (f"if (!SPU_CHUNK_GATE_OK(ctx, {self._A(tgt)})) "
++                f"{{ g_spu_trampoline_fn = {self.prefix}spu_func_{tgt:08X}; return; }}")
++
++    def _local_jump(self, tgt: int, func) -> str:
++        """A branch to tgt inside this lifted function. In a gated merged group, a
++        branch that crossed chunks was a SPU_DIRECT: keep its checks, then goto."""
++        ch = getattr(self, "_chunks", None)
++        if ch:
++            a = self._cur_addr
++            own = next(((c0, c1) for c0, c1 in ch if c0 <= a < c1), None)
++            if own is not None and not (own[0] <= tgt < own[1]):
++                if tgt not in {c0 for c0, _ in ch}:
++                    # into the middle of another chunk: the original form, unchanged
++                    self.branch_targets.add(tgt)
++                    return f"{{ SPU_DIRECT(ctx, {self._A(tgt)}, {self.prefix}spu_func_{tgt:08X}); }}"
++                self._gate_stubs.add(tgt)
++                return f"goto loc_g_{tgt:08X};"
++        return f"goto loc_{tgt:08X};"
++
 +    def _A(self, x: int) -> str:
 +        """An LS address derived from this image's own position."""
 +        return f"(ctx->code_base + 0x{x:X}u)" if self.reloc else f"0x{x:X}"
@@ -104637,7 +105301,15 @@ index 00b771d5..e4bb3b31 100644
      @staticmethod
      def _branch_target(insn: SPUInstruction):
          """The literal target of a direct branch, or None if it has none.
-@@ -754,7 +952,8 @@ class SPULifter:
+@@ -633,6 +901,7 @@ class SPULifter:
+         mn = insn.mnemonic
+         ops = _ops(insn.operands)
+         addr = insn.addr
++        self._cur_addr = addr
+ 
+         def rt(): return _reg(ops[0])
+         def ra(): return _reg(ops[1])
+@@ -754,7 +1023,8 @@ class SPULifter:
              "cwx": "spu_cwx", "cdx": "spu_cdx",
          }
          if mn in rr_bin:
@@ -104647,8 +105319,13 @@ index 00b771d5..e4bb3b31 100644
  
          # ---- unary (register) ----
          rr_un = {
-@@ -832,7 +1031,8 @@ class SPULifter:
-             return f"{g(rt())} = spu_shufb({g(ra())}, {g(rb())}, {g(rc)});"
+@@ -829,10 +1099,12 @@ class SPULifter:
+             return f"{g(rt())} = spu_selb({g(ra())}, {g(rb())}, {g(rc)});"
+         if mn == "shufb":
+             rc = _reg(ops[3])
+-            return f"{g(rt())} = spu_shufb({g(ra())}, {g(rb())}, {g(rc)});"
++            fn = "spu_shufb_lean" if self.lean_shufb else "spu_shufb"
++            return f"{g(rt())} = {fn}({g(ra())}, {g(rb())}, {g(rc)});"
          if mn in ("fma", "fms", "fnms", "mpya"):
              rc = _reg(ops[3])
 -            return f"{g(rt())} = spu_{mn}({g(ra())}, {g(rb())}, {g(rc)});"
@@ -104657,20 +105334,37 @@ index 00b771d5..e4bb3b31 100644
          # sfx: extended subtract — RT is also a source (carry-in = low bit of old RT).
          if mn == "sfx":
              return f"{g(rt())} = spu_sfx({g(ra())}, {g(rb())}, {g(rt())});"
-@@ -856,8 +1056,12 @@ class SPULifter:
+@@ -850,19 +1122,23 @@ class SPULifter:
+         if mn == "lqd":
+             disp, base = _disp_base(ops[1])
              if disp is not None:
-                 return f"spu_ls_write128(ctx, {g(base)}._u32[0] + {disp}, {g(rt())});"
+-                return f"{g(rt())} = spu_ls_read128(ctx, {g(base)}._u32[0] + {disp});"
++                return f"{g(rt())} = {self.ls_rd}(ctx, {g(base)}._u32[0] + {disp});"
+         if mn == "stqd":
+             disp, base = _disp_base(ops[1])
+             if disp is not None:
+-                return f"spu_ls_write128(ctx, {g(base)}._u32[0] + {disp}, {g(rt())});"
++                return f"{self.ls_wr}(ctx, {g(base)}._u32[0] + {disp}, {g(rt())});"
          if mn in ("lqa", "lqr"):
+-            return f"{g(rt())} = spu_ls_read128(ctx, {_imm(ops[1])});"
 +            if mn == "lqr" and self.reloc:
-+                return f"{g(rt())} = spu_ls_read128(ctx, ctx->code_base + ({_imm(ops[1])}));"
-             return f"{g(rt())} = spu_ls_read128(ctx, {_imm(ops[1])});"
++                return f"{g(rt())} = {self.ls_rd}(ctx, ctx->code_base + ({_imm(ops[1])}));"
++            return f"{g(rt())} = {self.ls_rd}(ctx, {_imm(ops[1])});"
          if mn in ("stqa", "stqr"):
+-            return f"spu_ls_write128(ctx, {_imm(ops[1])}, {g(rt())});"
 +            if mn == "stqr" and self.reloc:
-+                return f"spu_ls_write128(ctx, ctx->code_base + ({_imm(ops[1])}), {g(rt())});"
-             return f"spu_ls_write128(ctx, {_imm(ops[1])}, {g(rt())});"
++                return f"{self.ls_wr}(ctx, ctx->code_base + ({_imm(ops[1])}), {g(rt())});"
++            return f"{self.ls_wr}(ctx, {_imm(ops[1])}, {g(rt())});"
          if mn == "lqx":
-             return f"{g(rt())} = spu_ls_read128(ctx, {g(ra())}._u32[0] + {g(rb())}._u32[0]);"
-@@ -878,6 +1082,9 @@ class SPULifter:
+-            return f"{g(rt())} = spu_ls_read128(ctx, {g(ra())}._u32[0] + {g(rb())}._u32[0]);"
++            return f"{g(rt())} = {self.ls_rd}(ctx, {g(ra())}._u32[0] + {g(rb())}._u32[0]);"
+         if mn == "stqx":
+-            return f"spu_ls_write128(ctx, {g(ra())}._u32[0] + {g(rb())}._u32[0], {g(rt())});"
++            return f"{self.ls_wr}(ctx, {g(ra())}._u32[0] + {g(rb())}._u32[0], {g(rt())});"
+ 
+         # ---- channel ops ----
+         if mn == "rdch":
+@@ -878,6 +1154,9 @@ class SPULifter:
          # ---- branches ----
          if mn in ("br", "bra"):
              tgt = self._branch_target(insn)
@@ -104680,7 +105374,7 @@ index 00b771d5..e4bb3b31 100644
              # SELF-LOOP TRAP: `br .` (target == this instruction) is an infinite
              # hang on real SPU -- a deliberate trap, no forward progress. Emitting
              # `goto loc_self` busy-spins the host thread forever; stop the SPU
-@@ -892,7 +1099,14 @@ class SPULifter:
+@@ -892,7 +1171,14 @@ class SPULifter:
              tgt = self._branch_target(insn)
              # Link register: preferred word only, other slots ZERO (real HW /
              # RPCS3 v128::from32r) -- splatting corrupts full-quadword link use.
@@ -104696,7 +105390,7 @@ index 00b771d5..e4bb3b31 100644
              # SELF-LOOP TRAP: `brsl rX, .` (target == this instruction) is an
              # infinite loop on real SPU (re-sets the link each pass, never
              # advances) -- a trap, NOT a call. Emitting a host call recurses
-@@ -917,6 +1131,11 @@ class SPULifter:
+@@ -917,6 +1203,11 @@ class SPULifter:
                  # `bi $r0` returns via host return) + SPU_DRAIN (drains the
                  # callee's own tail-chains so they don't grow the caller frame)
                  # + image save/restore (adopt-on-serve cannot leak upward).
@@ -104708,7 +105402,13 @@ index 00b771d5..e4bb3b31 100644
                  return (f"{link} {{ int32_t _si = (int32_t)ctx->image_id; "
                          f"ctx->host_depth++; {self.prefix}spu_func_{tgt:08X}(ctx); "
                          f"spu_drain_call(ctx, 0x{addr + 4:X}); ctx->host_depth--; spu_img_restore(ctx, _si); }}")
-@@ -932,8 +1151,8 @@ class SPULifter:
+@@ -928,12 +1219,14 @@ class SPULifter:
+                 return (f'/* TODO spu: {mn} {insn.operands} */ '
+                         f'spu_unsupported(0x{insn.addr:X}, "{mn}");')
+             if func.start_addr <= tgt < func.end_addr:
++                if getattr(self, "_chunks", None):
++                    return f"if ({cond}) {self._local_jump(tgt, func)}"
+                 return f"if ({cond}) goto loc_{tgt:08X};"
              self.branch_targets.add(tgt)
              # Cross-function conditional branch = conditional tail: hand the
              # target to the trampoline and unwind (enclosing SPU_DRAIN re-enters).
@@ -104719,7 +105419,7 @@ index 00b771d5..e4bb3b31 100644
          # Interrupt enable/disable bits on the bi family (bie/bid, irete/iretd,
          # bisle(d)...): bit 0x40000 = E (enable), 0x80000 = D (disable), taking
          # effect when the branch is TAKEN. The WWS jobmanager's poll loop runs
-@@ -980,17 +1199,19 @@ class SPULifter:
+@@ -980,17 +1273,19 @@ class SPULifter:
              # SPU_DRAIN + image save/restore) so the callee's tail-chains drain
              # here and its `bi $r0` returns via host return.
              # read the target BEFORE writing the link: rt may be the same register as ra
@@ -104744,7 +105444,12 @@ index 00b771d5..e4bb3b31 100644
                      f"if ((ctx->event_status & ctx->event_mask) != 0) {{ "
                      f"{_ied}ctx->pc = _tg; "
                      f"g_spu_trampoline_fn = spu_indirect_branch; return; }} }}")
-@@ -1044,8 +1265,9 @@ class SPULifter:
+@@ -1040,12 +1335,13 @@ class SPULifter:
+         if tgt is None:
+             return "/* TODO spu: unresolved branch */;"
+         if func.start_addr <= tgt < func.end_addr:
+-            return f"goto loc_{tgt:08X};"
++            return self._local_jump(tgt, func)
          self.branch_targets.add(tgt)
          # Cross-function unconditional tail: hand the target to the trampoline
          # and unwind so the enclosing SPU_DRAIN re-enters (no host-stack growth).
@@ -104756,7 +105461,7 @@ index 00b771d5..e4bb3b31 100644
  
      # ------------------------------------------------------------------ #
      def emit_header(self) -> str:
-@@ -1070,7 +1292,8 @@ class SPULifter:
+@@ -1070,7 +1366,8 @@ class SPULifter:
          weak = "__attribute__((weak)) " if getattr(self, "weak_emit", False) else ""
          for f in self.functions:
              lines.append(f"void {weak}{f.name}(spu_context* ctx) {{")
@@ -104766,7 +105471,7 @@ index 00b771d5..e4bb3b31 100644
                  lines.append(b if b.endswith(":") else f"    {b}")
              lines.append("}")
              lines.append("")
-@@ -1089,7 +1312,7 @@ class SPULifter:
+@@ -1089,7 +1386,7 @@ class SPULifter:
              lines.append(" * branches that escape a function's range). */")
              for t in externs:
                  lines.append(f"void {self.prefix}spu_func_{t:08X}(spu_context* ctx) {{")
@@ -104775,7 +105480,7 @@ index 00b771d5..e4bb3b31 100644
                               f"g_spu_trampoline_fn = spu_indirect_branch; return;")
                  lines.append("}")
              lines.append("")
-@@ -1133,6 +1356,15 @@ def main() -> None:
+@@ -1133,6 +1430,15 @@ def main() -> None:
                          "targets + STT_FUNC symbols). When set, .text is "
                          "read from this ELF and the positional <input> arg "
                          "is ignored.")
@@ -104791,7 +105496,7 @@ index 00b771d5..e4bb3b31 100644
      p.add_argument("--trace", action="store_true",
                     help="Emit spu_trace_pc/spu_trace_rt around each instruction "
                          "for §3 diff-vs-RPCS3 validation. Output goes to stderr "
-@@ -1297,7 +1529,9 @@ def main() -> None:
+@@ -1297,7 +1603,9 @@ def main() -> None:
  
      insns = disassemble_spu(data, base)
  
@@ -104802,6 +105507,39 @@ index 00b771d5..e4bb3b31 100644
      lifter.bi_r0_jump = compute_bi_r0_jumps(insns, bounds)
      if lifter.bi_r0_jump:
          print(f"  {len(lifter.bi_r0_jump)} `bi $r0` computed-jump site(s) "
+@@ -1320,16 +1628,29 @@ def main() -> None:
+               f"{', '.join(f'0x{a:X}' for a in sorted(lifter.link_return))}")
+     lifter.func_starts = {s for s, e in bounds}  # for fall-through tail-call chaining
+     groups = {}
+-    if args.merge_chunks:
++    # Gated merge (SPU_LIFT_MERGE_CHUNKS=1, for lifts without --merge-chunks): the same
++    # groups, but every transfer between two chunks of a group keeps SPU_DIRECT's checks
++    # (SPU_CHUNK_GATE_OK: interrupts, stack-reset entries, PS3_SPU_DIRECT=0) and only the host call
++    # and the callee's prologue/epilogue go. Unset or 0 = one function per chunk, as before.
++    gated = not args.merge_chunks and _merge_chunks_default()
++    if args.merge_chunks or gated:
+         seeds = {base}
+         if args.extra_funcs:
+             seeds |= {int(x, 0) for x in args.extra_funcs.split(",") if x.strip()}
+         groups = merge_chunk_groups(insns, bounds, args.max_group_insns,
+                                     entry_points=seeds)
+         print(f"  {len(groups)} merged function group(s) "
+-              f"(--merge-chunks, max {args.max_group_insns} insns)")
++              f"({'gated, SPU_LIFT_MERGE_CHUNKS' if gated else '--merge-chunks'}, max {args.max_group_insns} insns)")
++    end_of = {}
++    for s0, e0 in sorted(bounds):
++        end_of.setdefault(s0, e0)
+     for s, e in bounds:
+-        lifter.lift_function(insns, s, groups.get(s, e))
++        chunks = None
++        if gated and s in groups:
++            chunks, c = [], s                   # the contiguous chain merge_chunk_groups took
++            while c < groups[s]:
++                chunks.append((c, end_of[c])); c = end_of[c]
++        lifter.lift_function(insns, s, groups.get(s, e), chunks=chunks)
+ 
+     os.makedirs(args.output, exist_ok=True)
+     hp = os.path.join(args.output, args.header_name)
 diff --git a/tools/test_edat_guest_klicensee.py b/tools/test_edat_guest_klicensee.py
 new file mode 100755
 index 00000000..34b2c0c6
