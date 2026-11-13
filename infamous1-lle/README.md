@@ -36,8 +36,13 @@ applied by `../tools/setup_toolkit.sh`): the inFAMOUS 2 port's patch, plus
   click and reads as pressed at it (`PS3_PAD_FIRE_AT`, 50%), the other a
   light resistance, a buzz on the firing trigger while it is held and the
   game runs the motors; sent only on a change, freed on close and at exit,
-  `PS3_PAD_ADAPTIVE=0` turns it off. Test: `libs/input/tests/test_pad_adaptive.c`
-  (and a `SendEffect` stub in `test_pad_hotplug.c`).
+  `PS3_PAD_ADAPTIVE=0` turns it off. The first effect also clears the
+  power-save bits another program (Steam Input) left, and a running Steam is
+  logged. The extras: player lights, the light bar (`PS3_PAD_LIGHT`, which
+  `main.cpp` defaults to electric blue `1e78ff`; red with the rumble unless
+  `PS3_PAD_LIGHT_HIT=0`), gyro aim (`PS3_PAD_GYRO=<percent>`) while the map's
+  L1 (aim) is held or `PS3_PAD_GYRO_MODE=always`. Test:
+  `libs/input/tests/test_pad_adaptive.c` (and SDL stubs in `test_pad_hotplug.c`).
 
 In the port:
 
