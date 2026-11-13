@@ -146,6 +146,17 @@
       "defaults": { "rumble": "true" }
     },
     {
+      "id": "adaptive_triggers",
+      "label": "Adaptive triggers",
+      "group": "Sound and controls",
+      "help": "DualSense only: the trigger you fire bolts with clicks like a gun's and buzzes while you fire; the other has a light resistance.",
+      "choices": [
+        { "label": "On", "set": { "adaptiveTriggers": "true" } },
+        { "label": "Off", "set": { "adaptiveTriggers": "false" } }
+      ],
+      "defaults": { "adaptiveTriggers": "true" }
+    },
+    {
       "id": "button_icons",
       "label": "Button prompts",
       "group": "Sound and controls",

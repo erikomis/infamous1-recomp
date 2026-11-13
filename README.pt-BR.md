@@ -55,6 +55,7 @@ Veja [CREDITS.pt-BR.md](CREDITS.pt-BR.md).
 | Filtragem anisotrópica até 16× | ✅ verificada neste jogo |
 | Resolução interna, MetalFX, FXAA/SMAA, nitidez, cor | 🧪 pelo runtime compartilhado e pelo launcher, opções mapeadas; sem A/B visual por combinação ainda |
 | Controle, teclado e mouse, vibração | 🧪 adaptados no launcher, bindings testados; nem todas as combinações de dispositivos |
+| Gatilhos adaptáveis do DualSense | 🧪 o gatilho do raio tem clique, o outro resistência; testado em unidade, ainda não sentido num controle |
 | Menu no jogo (F1 / Cmd+, / L3+R3) | 🧪 runtime compartilhado, ainda não verificado neste jogo |
 | Saves e troféus, gerenciador de saves no app | ✅ saves locais `BCUS98119_INFAMOUS_*` reconhecidos, saves do inFAMOUS 2 rejeitados |
 | O app: jogar, ajustes, controles, saves, logs | ✅ bundle macOS gerado, 72 testes passam, a janela inicia o jogo |
@@ -91,8 +92,8 @@ da do segundo jogo. Em português e inglês.
 - **Gráficos:** janela, tela cheia ou sem bordas, monitor, vsync, gama, filtragem
   anisotrópica (até 16×), FXAA ou SMAA, nitidez, upscaling MetalFX, resolução
   interna, ajustes de cor.
-- **Controles:** teclado, mouse e controle, câmera no mouse, vibração; **áudio**
-  com volume e saída.
+- **Controles:** teclado, mouse e controle, câmera no mouse, vibração,
+  gatilhos adaptáveis do DualSense; **áudio** com volume e saída.
 - **Saves:** listar, fazer backup, restaurar, importar/exportar com o RPCS3,
   `.zip`. Aceita `BCUS98119` / `NPUA80480` e rejeita `BCUS98125` (inFAMOUS 2).
 - **Troféus, logs e relatórios**, tudo local; nada é enviado.
@@ -194,7 +195,18 @@ cd infamous1-lle
 O `run.sh` define a janela de memória (`PS3_MEM_ALLOC_SIZE=0x30000000`) e o
 caminho de boot HDD (`/dev_hdd0/game/NPUA80480/USRDIR/EBOOT.BIN`) que o jogo
 precisa. Um controle (DualSense testado) funciona direto; teclado e mouse
-somam por cima, com o mesmo mapa do port do inFAMOUS 2:
+somam por cima, com o mesmo mapa do port do inFAMOUS 2.
+
+No DualSense os gatilhos ganham uma sensação (`PS3_PAD_ADAPTIVE=0`, ou a
+chave em Controles no launcher, desliga). O gatilho com que você dispara
+raios, o que o mapa de controles liga ao R1 (o direito quando o R1 não está
+em nenhum, como no mapa padrão, em que os gatilhos são L2/R2), tem um clique
+de gatilho de arma: conta como apertado no clique, mais ou menos na metade
+(`PS3_PAD_FIRE_AT=<10-90>`), e vibra com os motores enquanto você dispara. O
+outro gatilho, de mirar com o L1 ligado a ele, tem uma resistência leve. Os
+dois ficam livres quando o jogo fecha. O jogo registra
+`adaptive triggers on (fires with the right trigger at 50%)` no log.
+
 
 | Tecla | PS3 |
 | --- | --- |

@@ -135,6 +135,10 @@ pub struct Settings {
     /// PS3_RUMBLE=0 when off; PS3_RUMBLE_STRENGTH in percent (0-200).
     pub rumble: bool,
     pub rumble_strength: u32,
+    /// PS3_PAD_ADAPTIVE=0 when off: a DualSense's triggers get a feel (the
+    /// trigger bound to the bolt, R1, clicks like a gun's and fires at the
+    /// click; the other has a light resistance).
+    pub adaptive_triggers: bool,
     /// PS3_BUTTON_ICONS: the glyphs in the game's button prompts: "auto" (the
     /// controller in use), "playstation", "xbox" or "keyboard".
     pub button_icons: String,
@@ -206,6 +210,7 @@ impl Default for Settings {
             audio_device: String::new(),
             rumble: true,
             rumble_strength: 100,
+            adaptive_triggers: true,
             button_icons: "auto".into(),
             show_fps: false,
             extra_env: String::new(),
@@ -795,6 +800,9 @@ fn launch_env(s: &Settings, inst: &InstallInfo, input: &InputEnv) -> Vec<(String
         set("PS3_RUMBLE", "0".into());
     } else if s.rumble_strength != 100 {
         set("PS3_RUMBLE_STRENGTH", s.rumble_strength.min(200).to_string());
+    }
+    if !s.adaptive_triggers {
+        set("PS3_PAD_ADAPTIVE", "0".into());
     }
     // Auto is the game's own default: left out, so a choice made in the
     // in-game menu (overlay.ini) is not overridden.
@@ -2824,7 +2832,7 @@ mod tests {
         let mut s = Settings::default();
         let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
         for k in ["PS3_DISPLAY", "PS3_VSYNC", "PS3_AUDIO_VOLUME", "PS3_AUDIO_DEVICE", "PS3_RUMBLE", "PS3_RUMBLE_STRENGTH",
-                  "PS3_BUTTON_ICONS"] {
+                  "PS3_BUTTON_ICONS", "PS3_PAD_ADAPTIVE"] {
             assert!(!env.contains_key(k), "{k} is a default and must stay out");
         }
         s.display = "DELL U2720Q".into();
@@ -2842,6 +2850,7 @@ mod tests {
         assert_eq!(env.get("PS3_RUMBLE_STRENGTH").map(String::as_str), Some("150"));
         assert!(!env.contains_key("PS3_RUMBLE"));
         s.rumble = false;
+        s.adaptive_triggers = false;
         s.audio_volume = 0;
         let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
         assert_eq!(env.get("PS3_RUMBLE").map(String::as_str), Some("0"));

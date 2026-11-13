@@ -54,6 +54,7 @@ on the Mac; the launcher and the shared runtime come from the
 | Anisotropic filtering up to 16× | ✅ checked on this game |
 | Internal resolution, MetalFX, FXAA/SMAA, sharpening, colour | 🧪 through the shared runtime and the launcher, options mapped; no visual A/B per combination yet |
 | Controller, keyboard and mouse, rumble | 🧪 adapted in the launcher, bindings tested; not every device combination |
+| DualSense adaptive triggers | 🧪 the bolt trigger clicks, the other resists; unit-tested, not felt on a controller yet |
 | In-game menu (F1 / Cmd+, / L3+R3) | 🧪 shared runtime, not checked on this game yet |
 | Saves and trophies, saves manager in the app | ✅ local saves `BCUS98119_INFAMOUS_*` recognised, saves from inFAMOUS 2 rejected |
 | The app: play, settings, controls, saves, logs | ✅ macOS bundle built, 72 tests pass, window starts the game |
@@ -90,8 +91,8 @@ second game's. English and Portuguese.
 - **Graphics:** window, fullscreen or borderless, screen, vsync, gamma,
   anisotropic filtering (up to 16×), FXAA or SMAA, sharpening, MetalFX
   upscaling, internal resolution, colour adjustments.
-- **Controls:** keyboard, mouse and controller, mouse camera, vibration;
-  **audio** volume and output.
+- **Controls:** keyboard, mouse and controller, mouse camera, vibration,
+  DualSense adaptive triggers; **audio** volume and output.
 - **Saves:** list, back up, restore, import/export with RPCS3, `.zip`. It
   accepts `BCUS98119` / `NPUA80480` and rejects `BCUS98125` (inFAMOUS 2).
 - **Trophies, logs and reports**, all local; nothing is uploaded.
@@ -190,7 +191,17 @@ cd infamous1-lle
 `run.sh` sets the memory window (`PS3_MEM_ALLOC_SIZE=0x30000000`) and the HDD
 boot path (`/dev_hdd0/game/NPUA80480/USRDIR/EBOOT.BIN`) the game needs. A
 controller (DualSense tested) works out of the box; keyboard and mouse add on
-top of it, with the same layout as the inFAMOUS 2 port:
+top of it, with the same layout as the inFAMOUS 2 port.
+
+On a DualSense the triggers get a feel (`PS3_PAD_ADAPTIVE=0`, or the
+launcher's Controls switch, turns it off). The trigger you fire bolts with,
+the one the controls map binds to R1 (the right one when R1 is on neither,
+as in the default map, where the triggers are L2/R2), clicks like a gun's:
+it reads as pressed at the click, about half way (`PS3_PAD_FIRE_AT=<10-90>`),
+and buzzes with the motors while you fire. The other trigger, aiming with L1
+bound to it, has a light resistance. Both are set free when the game closes.
+The game logs `adaptive triggers on (fires with the right trigger at 50%)`.
+
 
 | Key | PS3 |
 | --- | --- |

@@ -65,6 +65,8 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 
 - [x] Controle, teclado e mouse mapeados pelo runtime compartilhado, bindings testados.
 - [ ] Todas as combinações de dispositivos em janela (DualSense, DualShock 4, Xbox, teclado e mouse).
+- [x] Gatilhos adaptáveis do DualSense (2026-11-13): o gatilho ligado ao raio (R1) tem clique e dispara no clique, o outro tem uma resistência leve, e vibra enquanto dispara; `test_pad_adaptive` no patch do toolkit, uma chave no launcher e no `recomplauncher.json`.
+- [ ] Senti-los num DualSense: no controle atual nenhuma saída chega a ele (nem a luz nem os gatilhos, também nos ports do Resistance), então por enquanto só a linha `adaptive triggers on` no log os confirma.
 - [ ] O menu no jogo (F1 / Cmd+, / L3+R3) neste jogo.
 
 ### Rebuild
