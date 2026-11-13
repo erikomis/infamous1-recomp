@@ -17117,7 +17117,7 @@ index aee795c9..5845a3fa 100644
  
  /* The clear colour most recently set via NV4097_SET_COLOR_CLEAR_VALUE, in the
 diff --git a/libs/video/rsx_metal_backend.m b/libs/video/rsx_metal_backend.m
-index 98db2857..b766fc99 100644
+index 98db2857..4caed76a 100644
 --- a/libs/video/rsx_metal_backend.m
 +++ b/libs/video/rsx_metal_backend.m
 @@ -48,11 +48,39 @@
@@ -18338,7 +18338,7 @@ index 98db2857..b766fc99 100644
  static u32 s_eng_dropped;
  
  static u8* s_eng_stage;
-@@ -2158,6 +3096,33 @@ static void release_surfaces(void)
+@@ -2158,6 +3096,36 @@ static void release_surfaces(void)
  static id<MTLRenderPipelineState> s_eng_depth_pso;
  static id<MTLRenderPipelineState> s_eng_depth_rgba_pso;
  static id<MTLSamplerState>        s_eng_point_sampler;
@@ -18351,6 +18351,8 @@ index 98db2857..b766fc99 100644
 +static MTLPixelFormat             s_gfx_fxaa_pso_fmt;
 +static id<MTLTexture>             s_gfx_fxaa_tex;
 +static id                         s_gfx_fx_scaler;   /* id<MTLFXSpatialScaler> */
++static id                         s_gfx_ds_kernel;   /* MPSImageLanczosScale (PS3_DOWNSCALE) */
++static id<MTLTexture>             s_gfx_ds_out;
 +static id<MTLTexture>             s_gfx_fx_out;
 +static int                        s_gfx_fx_logged;
 +/* PS3_AA=smaa: its library (third_party/smaa/smaa_msl.h), the three passes'
@@ -18365,6 +18367,7 @@ index 98db2857..b766fc99 100644
 +    s_smaa_lib = nil; s_smaa_edge_pso = s_smaa_weight_pso = s_smaa_blend_pso = nil;
 +    s_smaa_area = s_smaa_search = s_smaa_edges = s_smaa_weights = s_smaa_out = nil;
 +    s_gfx_fx_scaler = nil; s_gfx_fx_out = nil;
++    s_gfx_ds_kernel = nil; s_gfx_ds_out = nil;
 +    for (int k = 0; k < GFX_LUT_N; k++) s_gfx_lut_presets[k] = nil;
 +    if (s_gfx_lut != s_gfx_lut_file) { s_gfx_lut = s_gfx_lut_file; s_gfx_lut_size = s_gfx_lut_file_size; }
 +    s_gfx_lut_preset_built = -1;
@@ -18372,7 +18375,7 @@ index 98db2857..b766fc99 100644
  
  static NSString* const kEngHelperMSL = @
  "#include <metal_stdlib>\n"
-@@ -2174,17 +3139,454 @@ static void release_surfaces(void)
+@@ -2174,17 +3142,454 @@ static void release_surfaces(void)
  "                            sampler s [[sampler(0)]]) {\n"
  "    return src.sample(s, i.uv);\n"
  "}\n"
@@ -18831,7 +18834,7 @@ index 98db2857..b766fc99 100644
  
  static u32 eng_obj_add(id<MTLTexture> t)
  {
-@@ -2193,10 +3595,15 @@ static u32 eng_obj_add(id<MTLTexture> t)
+@@ -2193,10 +3598,15 @@ static u32 eng_obj_add(id<MTLTexture> t)
      if (s_eng_obj_free_count) {
          slot = s_eng_obj_free[--s_eng_obj_free_count];
      } else {
@@ -18848,7 +18851,7 @@ index 98db2857..b766fc99 100644
      return slot + 1;
  }
  
-@@ -2205,14 +3612,37 @@ static u32 eng_obj_add(id<MTLTexture> t)
+@@ -2205,14 +3615,37 @@ static u32 eng_obj_add(id<MTLTexture> t)
      return (handle && handle <= s_eng_obj_count) ? s_eng_obj[handle - 1] : nil;
  }
  
@@ -18888,7 +18891,7 @@ index 98db2857..b766fc99 100644
          s_eng_obj_retired[i] = 0;
          s_eng_obj[i] = nil;
          s_eng_obj_free[s_eng_obj_free_count++] = i;
-@@ -2224,7 +3654,7 @@ static void eng_obj_release(void* user, u32 handle)
+@@ -2224,7 +3657,7 @@ static void eng_obj_release(void* user, u32 handle)
      (void)user;
      if (!handle || handle > s_eng_obj_count || !s_eng_obj[handle - 1] ||
          s_eng_obj_retired[handle - 1]) return;
@@ -18897,7 +18900,7 @@ index 98db2857..b766fc99 100644
      /* Any view cut from this object stops being valid with it. */
      for (u32 i = 0; i < s_eng_view_count; i++)
          if (s_eng_view[i].surface == handle) {
-@@ -2332,12 +3762,19 @@ static int eng_init(void* user, u32 width, u32 height)
+@@ -2332,12 +3765,19 @@ static int eng_init(void* user, u32 width, u32 height)
      sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
      sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
      s_eng_point_sampler = [s_dev newSamplerStateWithDescriptor:sd];
@@ -18918,7 +18921,7 @@ index 98db2857..b766fc99 100644
      for (u32 i = 0; i < s_eng_obj_count; i++) s_eng_obj[i] = nil;
      for (u32 i = 0; i < s_eng_pipe_count; i++) {
          s_eng_pipe[i].pso = nil;
-@@ -2348,6 +3785,7 @@ static void eng_shutdown(void* user)
+@@ -2348,6 +3788,7 @@ static void eng_shutdown(void* user)
      s_eng_obj_count = s_eng_obj_free_count = 0;
      memset(s_eng_obj_retired, 0, sizeof s_eng_obj_retired);
      s_eng_pipe_count = s_eng_func_count = s_eng_samp_count = s_eng_view_count = 0;
@@ -18926,7 +18929,7 @@ index 98db2857..b766fc99 100644
      s_eng_rec_count = 0;
      for (int k = 0; k < ENG_STAGE_SLOTS; k++) { s_eng_slot_buf[k] = nil; s_eng_slot_busy[k] = 0; }
      s_eng_slot = -1;
-@@ -2357,12 +3795,16 @@ static void eng_shutdown(void* user)
+@@ -2357,12 +3798,16 @@ static void eng_shutdown(void* user)
      s_eng_blit_pso = nil;
      s_eng_depth_pso = nil;
      s_eng_point_sampler = nil;
@@ -18944,7 +18947,7 @@ index 98db2857..b766fc99 100644
      eng_encode_and_commit(nil);
  }
  
-@@ -2405,14 +3847,52 @@ static void eng_texture_upload(void* user, u32 handle, u32 face, u32 mip,
+@@ -2405,14 +3850,52 @@ static void eng_texture_upload(void* user, u32 handle, u32 face, u32 mip,
         bytesPerImage:0];
  }
  
@@ -18998,7 +19001,7 @@ index 98db2857..b766fc99 100644
                                                         mipmapped:NO];
      /* PixelFormatView because a unit sampling this target wears its own
       * TEXTURE_CONTROL1 crossbar as a view swizzle. */
-@@ -2420,10 +3900,29 @@ static u32 eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32 h,
+@@ -2420,10 +3903,29 @@ static u32 eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32 h,
                 MTLTextureUsagePixelFormatView;
      id<MTLTexture> t = [s_dev newTextureWithDescriptor:td];
      if (!t) return 0;
@@ -19030,7 +19033,7 @@ index 98db2857..b766fc99 100644
  }
  
  static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
-@@ -2446,7 +3945,7 @@ static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
+@@ -2446,7 +3948,7 @@ static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
                                   swizzle:MTLTextureSwizzleChannelsMake(
                                               swizzle_sel(sel[1]), swizzle_sel(sel[2]),
                                               swizzle_sel(sel[3]), swizzle_sel(sel[0]))];
@@ -19039,7 +19042,7 @@ index 98db2857..b766fc99 100644
      if (!handle) return 0;
      s_eng_view[s_eng_view_count].surface = surface;
      s_eng_view[s_eng_view_count].remap   = remap;
-@@ -2462,13 +3961,15 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
+@@ -2462,13 +3964,15 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
      if (!s_dev || !w || !h) return 0;
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTL_DEPTH_FORMAT
@@ -19059,7 +19062,7 @@ index 98db2857..b766fc99 100644
  }
  
  /* The sampleable copy of a depth target. The copy is a record in the stream,
-@@ -2494,10 +3995,10 @@ static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
+@@ -2494,10 +3998,10 @@ static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
      }
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR32Float
@@ -19072,7 +19075,7 @@ index 98db2857..b766fc99 100644
      if (!dst) return 0;
  
      EngRecord* r = &s_eng_rec[s_eng_rec_count++];
-@@ -2539,7 +4040,7 @@ static u32 eng_color_snapshot(void* user, u32 surface)
+@@ -2539,7 +4043,7 @@ static u32 eng_color_snapshot(void* user, u32 surface)
                                                             mipmapped:NO];
          td.usage       = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView | MTLTextureUsageRenderTarget;
          td.storageMode = MTLStorageModePrivate;
@@ -19081,7 +19084,7 @@ index 98db2857..b766fc99 100644
          if (!dst) return 0;
          u32 slot = s_eng_csnap_count;
          for (u32 i = 0; i < s_eng_csnap_count; i++) if (!s_eng_csnap[i].src) { slot = i; break; }
-@@ -2556,6 +4057,141 @@ static u32 eng_color_snapshot(void* user, u32 surface)
+@@ -2556,6 +4060,141 @@ static u32 eng_color_snapshot(void* user, u32 surface)
      return dst;
  }
  
@@ -19223,7 +19226,7 @@ index 98db2857..b766fc99 100644
  static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
  {
      (void)user;
-@@ -2575,23 +4211,33 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
+@@ -2575,23 +4214,33 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
          }
      }
      /* One persistent decode target per depth target: each resolve record
@@ -19263,7 +19266,7 @@ index 98db2857..b766fc99 100644
      }
      EngRecord* r = &s_eng_rec[s_eng_rec_count++];
      memset(r, 0, sizeof *r);
-@@ -2602,37 +4248,406 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
+@@ -2602,37 +4251,406 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
      return dst;
  }
  
@@ -19698,7 +19701,7 @@ index 98db2857..b766fc99 100644
   * rows its program reads (eng_bind_vs_constants_range). The VPConst text is
   * the one the VP decompiler and the engine's fixed-function shader both
   * emit; anything else is refused rather than run against the wrong layout. */
-@@ -2694,11 +4709,25 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2694,11 +4712,25 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
                      "epilogue is bound separately)\n");
          return 0;
      }
@@ -19729,7 +19732,7 @@ index 98db2857..b766fc99 100644
  
      /* Attribute index is the layout SLOT, not the guest's ATTRn number.
       * glslang numbers an HLSL input struct's members in DECLARATION order --
-@@ -2727,17 +4756,42 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2727,17 +4759,42 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
      if ((rs->color_mask >>  8) & 0xFF) wm |= MTLColorWriteMaskGreen;
      if ((rs->color_mask >> 16) & 0xFF) wm |= MTLColorWriteMaskRed;
      if ((rs->color_mask >> 24) & 0xFF) wm |= MTLColorWriteMaskAlpha;
@@ -19780,7 +19783,7 @@ index 98db2857..b766fc99 100644
              ca.blendingEnabled             = YES;
              ca.sourceRGBBlendFactor        = blend_factor_to_metal(rs->sf_rgb);
              ca.destinationRGBBlendFactor   = blend_factor_to_metal(rs->df_rgb);
-@@ -2748,13 +4802,17 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2748,13 +4805,17 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
          }
      }
  
@@ -19805,7 +19808,7 @@ index 98db2857..b766fc99 100644
      }
  
      /* Depth and stencil are pipeline state in D3D12 and an encoder object in
-@@ -2787,11 +4845,13 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2787,11 +4848,13 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
          }
      }
      id<MTLDepthStencilState> ds = [s_dev newDepthStencilStateWithDescriptor:dd];
@@ -19820,7 +19823,7 @@ index 98db2857..b766fc99 100644
      /* CULL_FACE FRONT=0x0404 BACK=0x0405 FRONT_AND_BACK=0x0408 (front here,
       * as in the D3D12 engine); FRONT_FACE CW=0x0900 CCW=0x0901. */
      s_eng_pipe[slot].cull = MTLCullModeNone;
-@@ -2801,21 +4861,50 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2801,21 +4864,50 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
                                      : (rs->cull_face == 0x0405u ? MTLCullModeBack
                                                                  : MTLCullModeNone);
      snprintf(s_eng_pipe[slot].desc, sizeof s_eng_pipe[slot].desc,
@@ -19873,7 +19876,7 @@ index 98db2857..b766fc99 100644
          s_eng_pipe[pipeline - 1].pso = nil;
          s_eng_pipe[pipeline - 1].ds  = nil;
      }
-@@ -2823,16 +4912,32 @@ static void eng_pipeline_release(void* user, u32 pipeline)
+@@ -2823,16 +4915,32 @@ static void eng_pipeline_release(void* user, u32 pipeline)
  
  /* ---- per-draw binding ---------------------------------------------------- */
  
@@ -19909,7 +19912,7 @@ index 98db2857..b766fc99 100644
      if (s_eng_samp_count >= ENG_MAX_SAMPLERS) return -1;
      MTLSamplerDescriptor* sd = [MTLSamplerDescriptor new];
      sd.minFilter = d->min_linear ? MTLSamplerMinMagFilterLinear
-@@ -2847,12 +4952,23 @@ static int eng_sampler_slot(const rsx_be_sampler_desc* d)
+@@ -2847,12 +4955,23 @@ static int eng_sampler_slot(const rsx_be_sampler_desc* d)
      sd.sAddressMode = gcm_wrap_to_metal(d->wrap_s);
      sd.tAddressMode = gcm_wrap_to_metal(d->wrap_t);
      sd.rAddressMode = gcm_wrap_to_metal(d->wrap_r);
@@ -19934,7 +19937,7 @@ index 98db2857..b766fc99 100644
      return slot;
  }
  
-@@ -2967,19 +5083,50 @@ static void eng_bind_vertex_textures(void* user, const u32* textures,
+@@ -2967,19 +5086,50 @@ static void eng_bind_vertex_textures(void* user, const u32* textures,
  static void eng_set_viewport(void* user, float x, float y, float w, float h)
  {
      (void)user;
@@ -19989,18 +19992,18 @@ index 98db2857..b766fc99 100644
  
  static void eng_draw(void* user, rsx_topology topology, const void* vertices,
                       u32 vertex_count, u32 stride, const u32* indices,
-@@ -2999,12 +5146,80 @@ static void eng_draw(void* user, rsx_topology topology, const void* vertices,
+@@ -2999,12 +5149,80 @@ static void eng_draw(void* user, rsx_topology topology, const void* vertices,
      r->kind         = ENG_REC_DRAW;
      r->topology     = topo_to_metal(topology);
      r->vb_off       = vb_off;
 +    r->vb_buf       = 0;
-     r->stride       = stride;
-     r->vertex_count = vertex_count;
-     r->ib_off       = ib_off;
++    r->stride       = stride;
++    r->vertex_count = vertex_count;
++    r->ib_off       = ib_off;
 +    r->ib_buf       = 0;
-     r->index_count  = indices ? index_count : 0;
- }
- 
++    r->index_count  = indices ? index_count : 0;
++}
++
 +static u32 eng_vbuf_create(void* user, const void* data, u32 bytes)
 +{
 +    (void)user;
@@ -20039,13 +20042,13 @@ index 98db2857..b766fc99 100644
 +    r->topology     = topo_to_metal(topology);
 +    r->vb_off       = 0;
 +    r->vb_buf       = vbuf;
-+    r->stride       = stride;
-+    r->vertex_count = vertex_count;
-+    r->ib_off       = ib_off;
+     r->stride       = stride;
+     r->vertex_count = vertex_count;
+     r->ib_off       = ib_off;
 +    r->ib_buf       = 0;
-+    r->index_count  = indices ? index_count : 0;
-+}
-+
+     r->index_count  = indices ? index_count : 0;
+ }
+ 
 +/* draw_vbuf with the indices in a persistent buffer too: nothing staged. */
 +static void eng_draw_vbuf_ib(void* user, rsx_topology topology, u32 vbuf,
 +                             u32 vertex_count, u32 stride, u32 ibuf, u32 index_count)
@@ -20070,7 +20073,7 @@ index 98db2857..b766fc99 100644
  static void eng_clear_color(void* user, u32 surface, const float rgba[4])
  {
      (void)user;
-@@ -3050,6 +5265,8 @@ static void eng_clear_depth_stencil(void* user, u32 depth, u32 flags,
+@@ -3050,6 +5268,8 @@ static void eng_clear_depth_stencil(void* user, u32 depth, u32 flags,
      const void* pso; const void* ds;
      int cull, winding;
      u32 stencil_ref;
@@ -20079,7 +20082,7 @@ index 98db2857..b766fc99 100644
      int have_vp, have_sc;
      MTLViewport vp;
      MTLScissorRect sc;
-@@ -3068,10 +5285,134 @@ static void eng_bound_reset(void)
+@@ -3068,10 +5288,134 @@ static void eng_bound_reset(void)
  }
  #define ENG_PTR(o) ((__bridge const void*)(o))
  
@@ -20214,7 +20217,7 @@ index 98db2857..b766fc99 100644
      /* PS3RECOMP_METAL_SKIP_PIPE=a,b,...: drop draws using those pipelines
       * (pass-log p= numbers) to bisect which pass breaks an image. */
      { static u32 skip[16]; static int nskip = -1;
-@@ -3079,6 +5420,10 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3079,6 +5423,10 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
            while (e && *e && nskip < 16) { skip[nskip++] = (u32)strtoul(e, (char**)&e, 10); if (*e == ',') e++; else break; } }
        for (int k = 0; k < nskip; k++) if (skip[k] == r->pipeline) return; }
      const EngPipeline* p = &s_eng_pipe[r->pipeline - 1];
@@ -20225,7 +20228,7 @@ index 98db2857..b766fc99 100644
      if (!p->pso) return;
      EngBound* b = &s_eng_bound;
      if (b->pso != ENG_PTR(p->pso)) { [enc setRenderPipelineState:p->pso]; b->pso = ENG_PTR(p->pso); }
-@@ -3098,6 +5443,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3098,6 +5446,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
      }
      if (b->winding != (int)p->winding) { [enc setFrontFacingWinding:p->winding]; b->winding = (int)p->winding; }
      if (b->stencil_ref != r->stencil_ref) { [enc setStencilReferenceValue:r->stencil_ref]; b->stencil_ref = r->stencil_ref; }
@@ -20240,7 +20243,7 @@ index 98db2857..b766fc99 100644
      MTLViewport vp = { r->vp[0], r->vp[1], r->vp[2], r->vp[3], 0.0, 1.0 };
      if (!b->have_vp || memcmp(&b->vp, &vp, sizeof vp)) { [enc setViewport:vp]; b->vp = vp; b->have_vp = 1; }
      if (r->sc[2] && r->sc[3]) {
-@@ -3105,7 +5458,15 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3105,7 +5461,15 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
          if (!b->have_sc || memcmp(&b->sc, &sc, sizeof sc)) { [enc setScissorRect:sc]; b->sc = sc; b->have_sc = 1; }
      }
      /* Same buffer, new offset: setVertexBufferOffset is the cheap form. */
@@ -20257,7 +20260,7 @@ index 98db2857..b766fc99 100644
          [enc setVertexBuffer:stage offset:r->vb_off atIndex:MTL_VB_INDEX];
          b->buf[0] = ENG_PTR(stage); b->buf_off[0] = r->vb_off;
      } else if (b->buf_off[0] != r->vb_off) {
-@@ -3131,9 +5492,60 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3131,9 +5495,60 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
              [enc setFragmentBufferOffset:r->ps_cb_off atIndex:1]; b->fbuf_off = r->ps_cb_off;
          }
      }
@@ -20318,7 +20321,7 @@ index 98db2857..b766fc99 100644
          id<MTLSamplerState> sm = r->samp[u] >= 0 ? s_eng_samp[r->samp[u]].samp : s_default_sampler;
          if (b->ftex[u] != ENG_PTR(t)) { [enc setFragmentTexture:t atIndex:(NSUInteger)u]; b->ftex[u] = ENG_PTR(t); }
          if (b->fsamp[u] != ENG_PTR(sm)) { [enc setFragmentSamplerState:sm atIndex:(NSUInteger)u]; b->fsamp[u] = ENG_PTR(sm); }
-@@ -3145,6 +5557,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3145,6 +5560,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
          if (b->vtex[u] != ENG_PTR(t)) { [enc setVertexTexture:t atIndex:MTL_VTEX_INDEX(u)]; b->vtex[u] = ENG_PTR(t); }
          if (b->vsamp[u] != ENG_PTR(sm)) { [enc setVertexSamplerState:sm atIndex:MTL_VSAMP_INDEX(u)]; b->vsamp[u] = ENG_PTR(sm); }
      }
@@ -20326,7 +20329,7 @@ index 98db2857..b766fc99 100644
      /* An indexed draw is really indexed here: the index buffer is what keeps a
       * strip's shared vertices from being fetched and uploaded per triangle.
       * Only a rebuilt triangle list is ever indexed; points and lines arrive as
-@@ -3182,7 +5595,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3182,7 +5598,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
                return;
            }
        } }
@@ -20342,7 +20345,7 @@ index 98db2857..b766fc99 100644
          [enc drawIndexedPrimitives:r->topology
                          indexCount:r->index_count
                           indexType:MTLIndexTypeUInt32
-@@ -3201,26 +5621,122 @@ static int eng_record_targets_are(const EngRecord* r, const u32* rt, u32 nrt)
+@@ -3201,26 +5624,122 @@ static int eng_record_targets_are(const EngRecord* r, const u32* rt, u32 nrt)
      return 1;
  }
  
@@ -20470,7 +20473,7 @@ index 98db2857..b766fc99 100644
              id<MTLTexture> src = eng_obj(r->depth);
              id<MTLTexture> dst = eng_obj(r->resolve_dst);
              id<MTLRenderPipelineState> pso = r->clear_flags ? s_eng_depth_rgba_pso : s_eng_depth_pso;
-@@ -3231,8 +5747,20 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3231,8 +5750,20 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
              rp.colorAttachments[0].storeAction = MTLStoreActionStore;
              id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
              if (!e) continue;
@@ -20491,7 +20494,7 @@ index 98db2857..b766fc99 100644
              [e setFragmentSamplerState:s_eng_point_sampler atIndex:0];
              [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
              [e endEncoding];
-@@ -3243,6 +5771,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3243,6 +5774,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * surface and an MRT set arrives as one clear per target, so they are
           * collected rather than compared: they become load actions on the
           * pass below when the draw that follows writes the same targets. */
@@ -20499,7 +20502,7 @@ index 98db2857..b766fc99 100644
          u32 n_cc = 0;
          u32 cc_surf[RSX_BE_MAX_COLOR_TARGETS];
          float cc_rgba[RSX_BE_MAX_COLOR_TARGETS][4];
-@@ -3250,10 +5779,12 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3250,10 +5782,12 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
          u32 cd = 0, ds_flags = 0;
          float cdepth = 1.0f;
          u8 cstencil = 0;
@@ -20516,7 +20519,7 @@ index 98db2857..b766fc99 100644
              if (r->kind == ENG_REC_CLEAR_COLOR) {
                  u32 k = 0;
                  while (k < n_cc && cc_surf[k] != r->rt[0]) k++;
-@@ -3281,9 +5812,10 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3281,9 +5815,10 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
          u32 nrt = n_cc;
          for (u32 k = 0; k < n_cc; k++) rt[k] = cc_surf[k];
          u32 depth = have_clear_ds ? cd : 0;
@@ -20530,7 +20533,7 @@ index 98db2857..b766fc99 100644
              int covered = 1;
              for (u32 k = 0; k < n_cc && covered; k++) {
                  int found = 0;
-@@ -3292,12 +5824,23 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3292,12 +5827,23 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
                  covered = found;
              }
              if (covered) {
@@ -20554,7 +20557,7 @@ index 98db2857..b766fc99 100644
          /* Metal wants every attachment the same size, and the engine registers
           * an MRT set's members at target A's, so a set whose members disagree
           * is one this frame cannot honour: it stops at the gap, as the vtable
-@@ -3312,7 +5855,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3312,7 +5858,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
              tex[attach++] = t;
          }
          id<MTLTexture> zbuf = eng_obj(depth);
@@ -20563,7 +20566,7 @@ index 98db2857..b766fc99 100644
          /* A pipeline always declares the depth attachment, so a draw pass
           * always has to have one; the display's shared buffer is the fallback
           * for a guest that never declared a zeta. */
-@@ -3359,33 +5902,318 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3359,40 +5905,329 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * skips those draws rather than encoding a mismatch. */
          if (!enc || attach != nrt) {
              if (enc) [enc endEncoding];
@@ -20799,8 +20802,6 @@ index 98db2857..b766fc99 100644
 +
 +/* The supersampling downscale gave up: say why once; the next pump puts the
 + * drawable back at the guest's size, which the layer shrinks as before. */
-+static id                s_gfx_ds_kernel;   /* MPSImageLanczosScale */
-+static id<MTLTexture>    s_gfx_ds_out;
 +static void gfx_downscale_fail(const char* why)
 +{
 +    if (!__atomic_exchange_n(&s_gfx_down_on, 0, __ATOMIC_ACQ_REL)) return;
@@ -20854,19 +20855,28 @@ index 98db2857..b766fc99 100644
 +#endif
 +}
 +
++/* What eng_blit_to_display did: the drawable was written (nothing else may
++ * be presented: it is LoadActionDontCare), and the frame went through the
++ * Lanczos reduction. */
++enum { ENG_BLIT_DRAWN = 1, ENG_BLIT_REDUCED = 2 };
++
  /* Put a surface on the drawable. A straight blit would need matching formats
   * and sizes; a full-screen sample needs neither, and the guest's surfaces are
 - * routinely a different size from the window. */
+-static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
+-                                id<MTLTexture> dst)
 + * routinely a different size from the window.
 + *
 + * With the graphics options: FXAA at the guest's size, then MetalFX up to the
 + * drawable's (or the Lanczos reduction down to it, PS3_DOWNSCALE), then this
 + * pass (sharpening + gamma). Each one that is off or fails is skipped and the
 + * next one takes what came before it. */
- static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
-                                 id<MTLTexture> dst)
++static int eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
++                               id<MTLTexture> dst)
  {
-     if (!src || !dst || !s_eng_helper_lib) return;
+-    if (!src || !dst || !s_eng_helper_lib) return;
++    if (!src || !dst || !s_eng_helper_lib) return 0;
++    int done = 0;
 +    if (__builtin_expect(__atomic_load_n(&s_gfx_dirty, __ATOMIC_RELAXED), 0)) {   /* PS3_TOGGLE_FILE */
 +        __atomic_store_n(&s_gfx_dirty, 0, __ATOMIC_RELAXED);
 +        gfx_options_read();
@@ -20881,7 +20891,7 @@ index 98db2857..b766fc99 100644
 +    } else if (scaling && __atomic_load_n(&s_gfx_down_on, __ATOMIC_ACQUIRE) &&
 +               [dst width] < [src width] && [dst height] < [src height]) {
 +        id<MTLTexture> t = gfx_lanczos(cb, src, [dst width], [dst height]);
-+        if (t) src = t;
++        if (t) { src = t; done |= ENG_BLIT_REDUCED; }
 +    }
      if (!s_eng_blit_pso || s_eng_blit_pso_fmt != [dst pixelFormat]) {
          MTLRenderPipelineDescriptor* pd = [MTLRenderPipelineDescriptor new];
@@ -20891,8 +20901,20 @@ index 98db2857..b766fc99 100644
          pd.colorAttachments[0].pixelFormat = [dst pixelFormat];
          NSError* err = nil;
          s_eng_blit_pso = [s_dev newRenderPipelineStateWithDescriptor:pd error:&err];
-@@ -3404,9 +6232,32 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
-     if (!e) return;
+         if (!s_eng_blit_pso) {
+             fprintf(stderr, "[rsx engine/metal] present pipeline failed: %s\n",
+                     [[err localizedDescription] UTF8String]);
+-            return;
++            return 0;
+         }
+         s_eng_blit_pso_fmt = [dst pixelFormat];
+     }
+@@ -3401,12 +6236,56 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
+     rp.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
+     rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+     id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
+-    if (!e) return;
++    if (!e) return 0;
      [e setRenderPipelineState:s_eng_blit_pso];
      [e setFragmentTexture:src atIndex:0];
 -    [e setFragmentSamplerState:s_eng_point_sampler atIndex:0];
@@ -20922,10 +20944,31 @@ index 98db2857..b766fc99 100644
      [e endEncoding];
 +    /* The in-game menu / HUD, over the finished picture at the drawable's size. */
 +    if (__builtin_expect(g_ps3_overlay_active, 0)) ps3_overlay_render((__bridge void*)cb, (__bridge void*)dst);
++    return done | ENG_BLIT_DRAWN;
++}
++
++/* A windowed frame's command buffer finished (its completion handler, on a
++ * Metal thread): a GPU error is said (the first few, then every 100th) and,
++ * after three in a row on frames the Lanczos reduction was part of, that
++ * reduction is turned off, as when it fails to start. */
++static void eng_gpu_status(id<MTLCommandBuffer> done, int reduced)
++{
++    static volatile u32 errors, in_a_row;
++    if ([done status] != MTLCommandBufferStatusError) {
++        if (__atomic_load_n(&in_a_row, __ATOMIC_RELAXED)) __atomic_store_n(&in_a_row, 0, __ATOMIC_RELAXED);
++        return;
++    }
++    const u32 n = __atomic_add_fetch(&errors, 1, __ATOMIC_RELAXED);
++    if (n <= 5 || n % 100 == 0)
++        fprintf(stderr, "[RSX metal] a frame failed on the GPU (%u so far): %s\n", n,
++                [[[done error] localizedDescription] UTF8String] ?: "no description");
++    const u32 row = reduced ? __atomic_add_fetch(&in_a_row, 1, __ATOMIC_RELAXED)
++                            : (__atomic_store_n(&in_a_row, 0, __ATOMIC_RELAXED), 0u);
++    if (row >= 3) gfx_downscale_fail("three frames in a row failed on the GPU");
  }
  
  /* Encode everything recorded so far and commit it.
-@@ -3437,50 +6288,88 @@ static void eng_pt_report(void)
+@@ -3437,50 +6316,88 @@ static void eng_pt_report(void)
      if (!t0) t0 = now;
      if (now - t0 < 10000000000ull) return;
      fprintf(stderr, "[rsx present] %u presents: in-flight wait %.0f ms, nextDrawable %.0f ms,"
@@ -21031,7 +21074,7 @@ index 98db2857..b766fc99 100644
                      fprintf(stderr, "[pass] %5u x%-4u kind=%d rt=", i, j - i, (int)r->kind);
                      for (u32 k = 0; k < r->nrt; k++) fprintf(stderr, "%s%u", k ? "," : "", r->rt[k]);
                      fprintf(stderr, " depth=%u", r->depth);
-@@ -3498,19 +6387,51 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3498,19 +6415,56 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
                      i = j;
                  }
              }
@@ -21042,6 +21085,8 @@ index 98db2857..b766fc99 100644
          id<MTLCommandBuffer> cb = [s_queue commandBuffer];
 +        s_enc_rec = recs; s_enc_count = nrec;
          eng_encode_records(cb, stage);
+-        if (present_dst && dst) eng_blit_to_display(cb, present_dst, dst);
+-        if (drawable) [cb presentDrawable:drawable];
 +        /* PS3_ASPECT: a frame of 16:9 overlay only (a menu, a motion comic, a
 +         * movie) gets black bars beside it; what a clear left there would
 +         * show otherwise. Written into the surface, so later presents of it
@@ -21064,9 +21109,11 @@ index 98db2857..b766fc99 100644
 +                [b endEncoding];
 +            }
 +        }
-         if (present_dst && dst) eng_blit_to_display(cb, present_dst, dst);
--        if (drawable) [cb presentDrawable:drawable];
-+        if (drawable) { fps_track_drawable(drawable); [cb presentDrawable:drawable]; }
++        const int blit = present_dst && dst ? eng_blit_to_display(cb, present_dst, dst) : 0;
++        /* A drawable the present pass did not write holds undefined
++         * contents (LoadActionDontCare): not presented, the window keeps
++         * the last frame. */
++        if (drawable && (blit & ENG_BLIT_DRAWN)) { fps_track_drawable(drawable); [cb presentDrawable:drawable]; }
 +        if (PS3_FT_ON()) ps3_ft_span(PS3_FT_GPU_ENCODE, 0, present_dst ? 1u : 0u, ft_nrec, pt, eng_pt_now());
          if (windowed_present) { pt1 = eng_pt_now(); s_pt_ns[2] += pt1 - pt; pt = pt1; }
          if (windowed_present) {
@@ -21078,7 +21125,9 @@ index 98db2857..b766fc99 100644
 +            /* PS3_FTRACE: the GPU's own time for an async present as well
 +             * (the synchronous paths record it after waitUntilCompleted). */
 +            const u32 ft_passes = s_ft_passes, ft_rc = s_ft_resolves | (s_ft_copies << 16);
++            const int reduced = (blit & ENG_BLIT_REDUCED) != 0;
 +            [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
++                eng_gpu_status(done, reduced);
 +                if (PS3_FT_ON()) {
 +                    const double gpu_s = [done GPUEndTime] - [done GPUStartTime];
 +                    const u64 w1 = eng_pt_now();
@@ -21087,7 +21136,7 @@ index 98db2857..b766fc99 100644
                  if (busy) __atomic_store_n(busy, 0, __ATOMIC_RELEASE);
                  dispatch_semaphore_signal(sem);
              }];
-@@ -3518,39 +6439,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3518,39 +6472,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
              s_pt_ns[3] += eng_pt_now() - pt;
              s_pt_n++;
              eng_pt_report();
@@ -21142,14 +21191,6 @@ index 98db2857..b766fc99 100644
 +    }
 +    return 1;
 +}
-+
-+/* PS3RECOMP_METAL_HEADLESS_SYNC=1: headless presents wait for the GPU. */
-+static int eng_headless_sync(void)
-+{
-+    static int v = -1;
-+    if (v < 0) v = getenv("PS3RECOMP_METAL_HEADLESS_SYNC") ? 1 : 0;
-+    return v;
-+}
  
 -        if (s_eng_dropped) {
 -            fprintf(stderr, "[rsx engine/metal] dropped %u record(s) (cap %d)\n",
@@ -21160,6 +21201,14 @@ index 98db2857..b766fc99 100644
 -        s_eng_stage_used = 0;
 -        s_eng_slot = -1;                      /* the next submission stages into the next slot */
 -        eng_collect_retired_objects();
++/* PS3RECOMP_METAL_HEADLESS_SYNC=1: headless presents wait for the GPU. */
++static int eng_headless_sync(void)
++{
++    static int v = -1;
++    if (v < 0) v = getenv("PS3RECOMP_METAL_HEADLESS_SYNC") ? 1 : 0;
++    return v;
++}
++
 +/* PS3RECOMP_METAL_ENCODE_THREAD (live): a present hands its records to an
 + * encoder thread and the RSX thread goes straight on with the next frame's
 + * FIFO, while the other record bank turns into the command buffer. The
@@ -21266,7 +21315,7 @@ index 98db2857..b766fc99 100644
          id<MTLCommandBuffer> fence = [s_queue commandBuffer];
          [fence commit];
          [fence waitUntilCompleted];
-@@ -3580,7 +6628,11 @@ static void eng_dump_frame(id<MTLTexture> src)
+@@ -3580,7 +6661,11 @@ static void eng_dump_frame(id<MTLTexture> src)
              fwrite(rgb, 1, 3, f);
          }
          fclose(f);
@@ -21279,7 +21328,7 @@ index 98db2857..b766fc99 100644
      }
      free(rgba);
  }
-@@ -3596,14 +6648,31 @@ static float eng_half_to_float(uint16_t h)
+@@ -3596,14 +6681,31 @@ static float eng_half_to_float(uint16_t h)
      else f = (s << 31) | ((e + 112) << 23) | (m << 13);
      float r; memcpy(&r, &f, 4); return r;
  }
@@ -21313,7 +21362,7 @@ index 98db2857..b766fc99 100644
      for (u32 h = 1; h <= s_eng_obj_count; ++h) {
          id<MTLTexture> t = s_eng_obj[h - 1];
          /* PS3RECOMP_METAL_SURF_DUMP_EXTRA=h,h,...: also dump these handles even if
-@@ -3659,6 +6728,26 @@ static void eng_dump_surfaces(void)
+@@ -3659,6 +6761,26 @@ static void eng_dump_surfaces(void)
              }
              fclose(f);
          }
@@ -21340,7 +21389,7 @@ index 98db2857..b766fc99 100644
          free(px);
      }
      fprintf(stderr, "[rsx engine/metal] dumped render targets for frame %u to %s\n", frame, dir);
-@@ -3671,17 +6760,67 @@ static void eng_present(void* user, u32 surface)
+@@ -3671,17 +6793,67 @@ static void eng_present(void* user, u32 surface)
      if (!src) { eng_encode_and_commit(nil); return; }
      const u32 nrec = s_eng_rec_count;
      eng_encode_and_commit(src);
@@ -21410,7 +21459,7 @@ index 98db2857..b766fc99 100644
      if ([t storageMode] != MTLStorageModePrivate) {
          [t getBytes:out bytesPerRow:out_pitch
           fromRegion:MTLRegionMake2D(x, y, w, h) mipmapLevel:0];
-@@ -3705,14 +6844,101 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3705,14 +6877,101 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
          memcpy((u8*)out + (size_t)row * out_pitch, src + (size_t)row * w * bpp, (size_t)w * bpp);
  }
  
@@ -21512,7 +21561,7 @@ index 98db2857..b766fc99 100644
      .color_target_create  = eng_color_target_create,
      .color_target_release = eng_obj_release,
      .surface_view         = eng_surface_view,
-@@ -3721,6 +6947,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3721,6 +6980,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .depth_snapshot       = eng_depth_snapshot,
      .color_snapshot       = eng_color_snapshot,
      .depth_snapshot_rgba8 = eng_depth_snapshot_rgba8,
@@ -21521,7 +21570,7 @@ index 98db2857..b766fc99 100644
      .pipeline_create      = eng_pipeline_create,
      .pipeline_release     = eng_pipeline_release,
      .bind_targets         = eng_bind_targets,
-@@ -3733,7 +6961,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3733,7 +6994,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .set_viewport         = eng_set_viewport,
      .set_scissor          = eng_set_scissor,
      .set_stencil_ref      = eng_set_stencil_ref,
@@ -21536,7 +21585,7 @@ index 98db2857..b766fc99 100644
      .clear_color          = eng_clear_color,
      .clear_depth_stencil  = eng_clear_depth_stencil,
      .present              = eng_present,
-@@ -3750,12 +6985,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3750,12 +7018,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  
          const char* hl = getenv("PS3RECOMP_METAL_HEADLESS");
          s_headless = (hl && *hl && *hl != '0');
@@ -21554,7 +21603,7 @@ index 98db2857..b766fc99 100644
          s_queue = [s_dev newCommandQueue];
          if (!s_queue) {
              fprintf(stderr, "[RSX metal] could not create command queue\n");
-@@ -3822,9 +7062,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3822,9 +7095,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
          if (rsx_draw_engine_enabled() &&
              rsx_draw_engine_init(s_width, s_height) == 0) {
              s_eng_active = 1;
@@ -21577,7 +21626,7 @@ index 98db2857..b766fc99 100644
          fprintf(stderr, "[RSX metal] %s on %s (%ux%u), guest shaders %s, %s path\n",
                  s_headless ? "headless" : "windowed",
                  [[s_dev name] UTF8String], s_width, s_height,
-@@ -3837,6 +7090,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3837,6 +7123,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  void rsx_metal_backend_shutdown(void)
  {
      @autoreleasepool {
@@ -21585,7 +21634,7 @@ index 98db2857..b766fc99 100644
          if (s_ready) rsx_set_backend(NULL);
          if (s_eng_active) rsx_draw_engine_shutdown();
          rsx_draw_engine_set_backend(NULL);
-@@ -3853,6 +7107,12 @@ void rsx_metal_backend_shutdown(void)
+@@ -3853,6 +7140,12 @@ void rsx_metal_backend_shutdown(void)
              s_inflight = nil;
          }
  #if !TARGET_OS_IPHONE
@@ -21598,7 +21647,7 @@ index 98db2857..b766fc99 100644
          if (s_window) { [s_window close]; s_window = nil; }
  #endif
          free(s_verts); s_verts = NULL;
-@@ -3886,25 +7146,180 @@ static int pump_messages_impl(void)
+@@ -3886,25 +7179,180 @@ static int pump_messages_impl(void)
                                                  inMode:NSDefaultRunLoopMode
                                                 dequeue:YES];
              if (!ev) break;
@@ -21783,7 +21832,7 @@ index 98db2857..b766fc99 100644
      }
  #endif
      return s_closed ? -1 : 0;
-@@ -4010,8 +7425,9 @@ void rsx_metal_backend_present(void)
+@@ -4010,8 +7458,9 @@ void rsx_metal_backend_present(void)
              encode_draw(enc, &rec->u.draw, &ps);
          }
          if (enc) [enc endEncoding];
@@ -21794,7 +21843,18 @@ index 98db2857..b766fc99 100644
  
          if (s_headless) {
              /* The readback below must see a completed frame. */
-@@ -4068,3 +7484,121 @@ u32 rsx_metal_backend_guest_draws(void)
+@@ -4019,8 +7468,8 @@ void rsx_metal_backend_present(void)
+             [cb waitUntilCompleted];
+         } else {
+             dispatch_semaphore_t sem = s_inflight;
+-            [cb addCompletedHandler:^(id<MTLCommandBuffer> _unused) {
+-                (void)_unused;
++            [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
++                eng_gpu_status(done, 0);
+                 dispatch_semaphore_signal(sem);
+             }];
+             [cb commit];        /* no wait: the CPU goes on to the next frame */
+@@ -4068,3 +7517,121 @@ u32 rsx_metal_backend_guest_draws(void)
  {
      return s_eng_active ? rsx_draw_engine_guest_draws() : s_last_guest_draws;
  }
@@ -22867,10 +22927,10 @@ index 00000000..49380567
 +}
 diff --git a/libs/video/tests/test_metal_downscale.m b/libs/video/tests/test_metal_downscale.m
 new file mode 100644
-index 00000000..9c87c5b9
+index 00000000..7bf70848
 --- /dev/null
 +++ b/libs/video/tests/test_metal_downscale.m
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,156 @@
 +/* The present's supersampling path (PS3_DOWNSCALE, rsx_metal_backend.m) on a
 + * real Metal device, with no window: a display buffer three times the
 + * drawable's size reduced through gfx_lanczos(). A one-pixel checkerboard --
@@ -22886,6 +22946,21 @@ index 00000000..9c87c5b9
 +#include <assert.h>
 +/* cellPad's (libs/input): the window's mouse handling, linked in through wm_keep_drawable's file */
 +volatile uint32_t g_pad_mouse_buttons;
++
++/* A finished command buffer as eng_gpu_status reads it: a status and an error. */
++@interface FakeDone : NSObject
++@property MTLCommandBufferStatus status;
++- (NSError*)error;
++@end
++@implementation FakeDone
++- (NSError*)error { return [NSError errorWithDomain:@"test" code:1 userInfo:@{NSLocalizedDescriptionKey: @"fake GPU fault"}]; }
++@end
++static void finished(MTLCommandBufferStatus st, int reduced)
++{
++    FakeDone* d = [FakeDone new];
++    d.status = st;
++    eng_gpu_status((id<MTLCommandBuffer>)d, reduced);
++}
 +
 +static id<MTLTexture> checker(NSUInteger w, NSUInteger h, MTLTextureUsage usage)
 +{
@@ -22979,6 +23054,26 @@ index 00000000..9c87c5b9
 +        /* the same sizes reuse the output */
 +        cb = [s_queue commandBuffer];
 +        assert(gfx_lanczos(cb, src, 64, 36) == out);
++        [cb commit]; [cb waitUntilCompleted];
++
++        /* GPU failures: two failed reduced frames and a good one leave the
++         * reduction on; failures on frames it was not part of do not count;
++         * three failed reduced frames in a row turn it off. */
++        finished(MTLCommandBufferStatusError, 1); finished(MTLCommandBufferStatusError, 1);
++        finished(MTLCommandBufferStatusCompleted, 1);
++        finished(MTLCommandBufferStatusError, 1); finished(MTLCommandBufferStatusError, 0);
++        finished(MTLCommandBufferStatusError, 1); finished(MTLCommandBufferStatusError, 1);
++        assert(s_gfx_down_on);
++        finished(MTLCommandBufferStatusError, 1);
++        assert(!s_gfx_down_on);
++        __atomic_store_n(&s_gfx_down_on, 1, __ATOMIC_RELEASE);
++        finished(MTLCommandBufferStatusCompleted, 1);
++
++        /* a teardown lets the Lanczos objects go with the device */
++        gfx_post_release();
++        assert(s_gfx_ds_kernel == nil && s_gfx_ds_out == nil);
++        cb = [s_queue commandBuffer];
++        assert(gfx_lanczos(cb, src, 64, 36) != nil && s_gfx_ds_kernel != nil);   /* and they come back */
 +        [cb commit]; [cb waitUntilCompleted];
 +
 +        /* a source a shader may not read: it gives up, the layer shrinks as before */
