@@ -31,6 +31,13 @@ applied by `../tools/setup_toolkit.sh`): the inFAMOUS 2 port's patch, plus
   (hex, 16 MB to 3 GB, default 256 MB). The 256 MB window ran out during the
   boot's scan of the streaming cache, so the audio/streaming init never
   finished. `run.sh` sets 768 MB.
+- **`cellPad`:** DualSense adaptive triggers. The physical trigger the map
+  binds to R1 (the bolt; the right one when R1 is on neither) gets a gun
+  click and reads as pressed at it (`PS3_PAD_FIRE_AT`, 50%), the other a
+  light resistance, a buzz on the firing trigger while it is held and the
+  game runs the motors; sent only on a change, freed on close and at exit,
+  `PS3_PAD_ADAPTIVE=0` turns it off. Test: `libs/input/tests/test_pad_adaptive.c`
+  (and a `SendEffect` stub in `test_pad_hotplug.c`).
 
 In the port:
 
