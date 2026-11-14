@@ -55,6 +55,7 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 ### Stability
 
 - [ ] Run `tools/profile_run.sh` in gameplay: fps per period and the hottest code, as a baseline before the GPU lighting work.
+- [x] No GPU memory leak (2026-11-14): the inFAMOUS 2 port froze the Mac with one (~100 MB/s of autoreleased Metal objects never freed). Here the footprint stays flat headless, boot through the intro into the tutorial (1.15-1.18 GB over 220 s; the Nov 10 build the same over 90 s); every FIFO drain and every readback now runs in its own autorelease pool anyway.
 - [x] First-use shader hitches (2026-11-13): new pipelines build in parallel on a worker pool and each draw waits only for its own, none skipped (from the inFAMOUS 2 port, where the worst hitch went 338 → ~100 ms warm and 3 s → 1 s cold).
 - [x] The SPU lifter's lean `shufb` and local-store access (2026-11-13, from the inFAMOUS 2 port, bit-exact by exhaustive tests). A rebuild with it reached the same scenes at the same moments as the build before it, side by side headless; the 4-6% fewer SPU cycles measured in inFAMOUS 2 was not measured here.
 
