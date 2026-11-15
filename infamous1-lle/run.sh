@@ -178,9 +178,10 @@ export GCM_PARK_GRACE_MS="${GCM_PARK_GRACE_MS:-1000}"
 # It resizes freely and the image stays 16:9, letterboxed. Cmd+F or
 # Option+Return toggles fullscreen, Cmd+Ctrl+F macOS fullscreen; a click in
 # the game captures the mouse, Esc or Cmd releases it.
-# The Dock icon is the launcher's original placeholder (no Sony art);
-# PS3_WINDOW_ICON=game uses the player's own PS3_GAME/ICON0.PNG instead,
-# =<file> any image, =none the system's generic icon.
+# The Dock icon is the game's: the player's own copy's PS3_GAME/ICON0.PNG
+# (read at run time from the VFS; nothing of the game is in the build), or
+# the port's original placeholder when the copy has none.
+# PS3_WINDOW_ICON=<file> any image, =none the system's generic icon.
 # Boot profile (see NOTES.md, 2026-11-10): the guest's boot-time cache scan
 # asks the sys_memory window for every 1 MiB page it touches while it runs, and
 # the runtime's default 256 MB window ran out mid-scan -- the caller then
@@ -189,7 +190,11 @@ export GCM_PARK_GRACE_MS="${GCM_PARK_GRACE_MS:-1000}"
 # 0x4AC00000, i.e. ~172 MB), and the menu renders 60 fps headless.
 export PS3_MEM_ALLOC_SIZE="${PS3_MEM_ALLOC_SIZE:-0x30000000}"
 
-export PS3_WINDOW_ICON="${PS3_WINDOW_ICON-$here/window_icon.png}"
+if [ -z "${PS3_WINDOW_ICON+set}" ]; then
+    if [ -f "$vfs/PS3_GAME/ICON0.PNG" ]; then PS3_WINDOW_ICON="$vfs/PS3_GAME/ICON0.PNG"
+    else PS3_WINDOW_ICON="$here/window_icon.png"; fi
+fi
+export PS3_WINDOW_ICON
 
 # macOS builds an app bundle (CMakeLists.txt): run the executable inside it,
 # directly, so the process has the bundle's identity -- that is what makes

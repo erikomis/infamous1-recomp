@@ -216,7 +216,7 @@ impl Default for Settings {
             mouse_capture: true,
             window_mode: "windowed".into(),
             window_size: String::new(),
-            game_icon: false,
+            game_icon: true,
             display: String::new(),
             vsync: true,
             audio_volume: 100,
@@ -799,8 +799,12 @@ fn launch_env(s: &Settings, inst: &InstallInfo, input: &InputEnv) -> Vec<(String
     if valid_window_size(&s.window_size) {
         set("PS3_WINDOW_SIZE", s.window_size.clone());
     }
+    // The player's own ICON0.PNG in the Dock (run.sh's default too); off:
+    // the port's placeholder, which run.sh would only fall back to.
     if s.game_icon {
         set("PS3_WINDOW_ICON", "game".into());
+    } else {
+        set("PS3_WINDOW_ICON", Path::new(&inst.port_dir).join("window_icon.png").to_string_lossy().into_owned());
     }
     if !s.display.trim().is_empty() {
         set("PS3_DISPLAY", s.display.trim().to_string());
@@ -2840,6 +2844,11 @@ mod tests {
         assert_eq!(env.get("PS3_WINDOW_MODE").map(String::as_str), Some("borderless"));
         assert_eq!(env.get("PS3_WINDOW_SIZE").map(String::as_str), Some("1920x1080"));
         assert_eq!(env.get("PS3_WINDOW_ICON").map(String::as_str), Some("game"));
+        assert!(Settings::default().game_icon, "the copy's icon in the Dock by default");
+        s.game_icon = false; // off: the port's placeholder, not run.sh's default (the copy's icon)
+        let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
+        assert!(env.get("PS3_WINDOW_ICON").is_some_and(|v| v.ends_with("window_icon.png")));
+        s.game_icon = true;
         s.window_size = "big".into();
         let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
         assert!(!env.contains_key("PS3_WINDOW_SIZE"));

@@ -582,7 +582,7 @@ function bindSettings() {
       mouseCapture: true,
       windowMode: "windowed",
       windowSize: "",
-      gameIcon: false,
+      gameIcon: true,
       display: "",
       vsync: true,
       audioVolume: 100,
