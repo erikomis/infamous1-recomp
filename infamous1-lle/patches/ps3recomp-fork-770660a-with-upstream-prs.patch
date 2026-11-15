@@ -8495,7 +8495,7 @@ index 00000000..8514b884
 +#endif
 diff --git a/libs/video/ps3_overlay.mm b/libs/video/ps3_overlay.mm
 new file mode 100644
-index 00000000..ed3121b1
+index 00000000..94fa79bc
 --- /dev/null
 +++ b/libs/video/ps3_overlay.mm
 @@ -0,0 +1,1721 @@
@@ -8556,7 +8556,7 @@ index 00000000..ed3121b1
 +int   rsx_metal_gfx_lut_preset(void);   /* 0 none, 1 warm, 2 cool, 3 film, 4 vivid */
 +void  rsx_metal_gfx_set_lut_preset(int p);
 +int   rsx_metal_gfx_lut_file(void);
-+int   rsx_metal_gfx_aa(void);           /* 0 off, 1 FXAA, 2 SMAA */
++int   rsx_metal_gfx_aa(void);           /* 0 off, 1 FXAA, 2 SMAA, 3 hybrid */
 +void  rsx_metal_gfx_set_aa(int mode);
 +int   rsx_metal_gfx_aniso(void);
 +int   rsx_metal_gfx_upscale(void);
@@ -9368,9 +9368,9 @@ index 00000000..ed3121b1
 +        }
 +        env_mark(V_LUT_STRENGTH);
 +    }
-+    { static const char* const aa_val[3] = { "off", "fxaa", "smaa" };
-+      const char* aa_name[3] = { L("off", "desligado"), "FXAA", "SMAA" };
-+      if (ImGui::Combo(L("Anti-aliasing", "Antisserrilhamento"), &s_ui.aa, aa_name, 3)) {
++    { static const char* const aa_val[4] = { "off", "fxaa", "smaa", "smaa-fxaa" };
++      const char* aa_name[4] = { L("off", "desligado"), "FXAA", "SMAA", "SMAA + FXAA" };
++      if (ImGui::Combo(L("Anti-aliasing", "Antisserrilhamento"), &s_ui.aa, aa_name, 4)) {
 +          rsx_metal_gfx_set_aa(s_ui.aa);
 +          set_value(V_AA, "%s", aa_val[s_ui.aa]);
 +      } }
@@ -11638,7 +11638,7 @@ index 176efc44..e1ef017f 100644
  
  /* ---- lifecycle -------------------------------------------------------- */
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 9a76e67b..7b415ee8 100644
+index 9a76e67b..ce72a403 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,8 @@
@@ -14695,7 +14695,22 @@ index 9a76e67b..7b415ee8 100644
      const u32 prim = g.rsx.current_primitive;
      if (!dc.n_packets) { eng_drop("no_packets", prim); return; }
  
-@@ -1949,6 +4280,14 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -1929,6 +4260,14 @@ static void sink_end(void* user, const rsx_dispatch* r)
+         if (topology == RSX_TOPOLOGY_UNSUPPORTED) { eng_drop("unsupported_topology", prim); return; }
+     }
+ 
++    /* Metal has no cull-both mode. FRONT_AND_BACK suppresses polygons;
++     * mapping it to FRONT in the backend still draws all back faces.
++     * Face culling does not apply to points or lines. */
++    if (topology == RSX_TOPOLOGY_TRIANGLES &&
++        (rsx_dsp_reg(&g.rsx, 0x183C) & 1u) &&
++        rsx_dsp_reg(&g.rsx, 0x1830) == 0x0408u)
++        return;
++
+     rsx_vertex_layout_plan layout;
+     const u64 ds_tl = eng_ds_enabled() ? eng_ds_now() : 0;
+     eng_vertex_layout(&layout);
+@@ -1949,6 +4288,14 @@ static void sink_end(void* user, const rsx_dispatch* r)
              : dc.n_source_refs - dc.n_source_refs % 3u;
      }
      if (!n_draw) { eng_drop("n_draw0", prim); return; }
@@ -14710,7 +14725,7 @@ index 9a76e67b..7b415ee8 100644
  
      rsx_be_render_state rs;
      rsx_draw_engine_decode_render_state(&g.rsx, &rs);
-@@ -1976,8 +4315,45 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -1976,8 +4323,45 @@ static void sink_end(void* user, const rsx_dispatch* r)
      memset(vtextures, 0, sizeof vtextures);
      memset(vsamplers, 0, sizeof vsamplers);
      DS_MARK(ns_bind);   /* render state, targets, zeta: counted with binds */
@@ -14758,7 +14773,7 @@ index 9a76e67b..7b415ee8 100644
      const u32 vtex_mask = sink_bind_vertex_textures(eng_vtex_mask(), vtextures,
                                                      vsamplers);
  
-@@ -1991,14 +4367,180 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -1991,14 +4375,180 @@ static void sink_end(void* user, const rsx_dispatch* r)
                                            eng_surface_format(sf.color_format),
                                            n_targets, &pipeline_is_fixed);
      if (!pipeline) { eng_drop("pipeline", prim); return; }
@@ -14941,7 +14956,7 @@ index 9a76e67b..7b415ee8 100644
      }
  
      /* The transform constant block, then the viewport epilogue the vertex
-@@ -2035,7 +4577,8 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -2035,7 +4585,8 @@ static void sink_end(void* user, const rsx_dispatch* r)
      /* The buffered fragment constants, then fp_alpha: the layout
       * rsx_fp_decompile_buffered_ex compiled the shader against. */
      const u32 nslots = g.fp_constants->count ? g.fp_constants->count : 1u;
@@ -14951,7 +14966,7 @@ index 9a76e67b..7b415ee8 100644
      if (g.fp_cb_cap < fp_bytes) {
          u8* n = (u8*)realloc(g.fp_cb, fp_bytes);
          if (!n) { eng_drop("n0", prim); return; }
-@@ -2045,6 +4588,57 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -2045,6 +4596,57 @@ static void sink_end(void* user, const rsx_dispatch* r)
      memset(g.fp_cb, 0, fp_bytes);
      if (g.fp_constants->count)
          memcpy(g.fp_cb, g.fp_constants->values, g.fp_constants->count * 16u);
@@ -15009,7 +15024,7 @@ index 9a76e67b..7b415ee8 100644
      { float* alpha = (float*)(g.fp_cb + nslots * 16u);
        alpha[0] = rsx_fp_alpha_ref(rs.alpha_ref_raw, rs.alpha_ref_format);
        /* WPOS y = pos.y * alpha[1] + alpha[2]: SHADER_WINDOW (0x1D88) bits
-@@ -2054,7 +4648,149 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -2054,7 +4656,149 @@ static void sink_end(void* user, const rsx_dispatch* r)
        const int bottom = (win >> 12) & 1;
        alpha[1] = bottom ? -1.0f : 1.0f;
        alpha[2] = bottom ? (float)(win & 0xFFFu) : 0.0f;
@@ -15160,7 +15175,7 @@ index 9a76e67b..7b415ee8 100644
  
      /* The depth attachment is cleared the first time it is bound, so a title
       * that never clears its shadow zeta still tests against something. */
-@@ -2079,6 +4815,72 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -2079,6 +4823,72 @@ static void sink_end(void* user, const rsx_dispatch* r)
      g.be->bind_ps_constants(g.be->user, g.fp_cb, fp_bytes);
      g.be->bind_textures(g.be->user, textures, samplers, tex_mask);
      g.be->bind_vertex_textures(g.be->user, vtextures, vsamplers, vtex_mask);
@@ -15233,7 +15248,7 @@ index 9a76e67b..7b415ee8 100644
      g.be->set_viewport(g.be->user, 0.0f, 0.0f, W, H);
  
      /* The guest scissor intersected with the surface. The nv40 reset is a
-@@ -2106,11 +4908,20 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -2106,11 +4916,20 @@ static void sink_end(void* user, const rsx_dispatch* r)
      /* Dynamic, and deliberately outside the pipeline key. */
      g.be->set_stencil_ref(g.be->user,
                            rsx_dsp_reg(&g.rsx, M_STENCIL_FUNC_REF) & 0xFFu);
@@ -15256,7 +15271,7 @@ index 9a76e67b..7b415ee8 100644
      DS_MARK(ns_draw);
  #undef DS_MARK
      /* Counted only when the draw ran the guest's OWN programs, which is what
-@@ -2120,14 +4931,26 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -2120,14 +4939,26 @@ static void sink_end(void* user, const rsx_dispatch* r)
      if (ds_t0) {
          ds.draws++;
          ds.vbytes += (u64)uploaded * layout.stride;
@@ -15285,7 +15300,7 @@ index 9a76e67b..7b415ee8 100644
  }
  
  static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
-@@ -2138,6 +4961,21 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
+@@ -2138,6 +4969,21 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
      const u32 n_targets = eng_current_target_set(targets);
      if (!n_targets) return;
  
@@ -15307,7 +15322,7 @@ index 9a76e67b..7b415ee8 100644
      if (mask & (RSX_CLEAR_COLOR_R | RSX_CLEAR_COLOR_G |
                  RSX_CLEAR_COLOR_B | RSX_CLEAR_COLOR_A)) {
          const u32 c = rsx_dsp_clear_color(&g.rsx);
-@@ -2174,8 +5012,8 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
+@@ -2174,8 +5020,8 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
              /* A clear invalidates the older published depth image; the next
               * texture consumer resolves the newly written pass exactly once. */
              g.zdepths[zslot].had_write = 0;
@@ -15318,7 +15333,7 @@ index 9a76e67b..7b415ee8 100644
          }
      }
  }
-@@ -2317,6 +5155,10 @@ static void eng_present(u32 buffer_id)
+@@ -2317,6 +5163,10 @@ static void eng_present(u32 buffer_id)
                      on = e ? 1 : 0; if (e) off = (u32)strtoul(e, NULL, 16); }
        if (on) for (u32 i = 0; i < g.n_surfaces; ++i)
            if (g.surfaces[i].offset == off) { g.be->present(g.be->user, g.surfaces[i].handle); goto presented; } }
@@ -15329,7 +15344,7 @@ index 9a76e67b..7b415ee8 100644
      { const u64 t = eng_ds_now();
        g.be->present(g.be->user, g.surfaces[target].handle);
        const int src = s_present_src;
-@@ -2345,15 +5187,51 @@ presented:;
+@@ -2345,15 +5195,51 @@ presented:;
                memset(s_pres_n, 0, sizeof s_pres_n); memset(s_pres_drew, 0, sizeof s_pres_drew);
                memset(s_pres_ns, 0, sizeof s_pres_ns);
                pf = b0 = b1 = bw = 0; t0 = now; } } }
@@ -15385,7 +15400,7 @@ index 9a76e67b..7b415ee8 100644
            extern uint8_t* vm_base;
            FILE* f = fopen(dpath, "w");
            if (f && vm_base) {
-@@ -2375,9 +5253,10 @@ presented:;
+@@ -2375,9 +5261,10 @@ presented:;
            if (me) { char* d; mloc = (u32)strtoul(me, &d, 10); moff = (u32)strtoul(d + 1, &d, 16); mlen = (u32)strtoul(d + 1, 0, 0); } }
        if (me && g.guest_draws > 1000) { static u32 n; if ((n++ % 20) == 0) {
            const u8* q = eng_guest_ptr(NULL, mloc, moff, mlen);
@@ -15399,7 +15414,7 @@ index 9a76e67b..7b415ee8 100644
      /* PS3RECOMP_ENG_PROBE=<hex offset>[,<file.ppm>]: on world frames, read
       * back the newest target at that guest address and print its mean --
       * handles are not stable across runs, addresses are. */
-@@ -2408,7 +5287,22 @@ presented:;
+@@ -2408,7 +5295,22 @@ presented:;
                }
            } } }
      eng_constlog_frame_end();
@@ -15422,7 +15437,7 @@ index 9a76e67b..7b415ee8 100644
      eng_ds_frame_end(g.guest_draws);
      g.last_guest_draws = g.guest_draws;
      g.guest_draws = 0;
-@@ -2473,6 +5367,7 @@ int rsx_draw_engine_init(u32 width, u32 height)
+@@ -2473,6 +5375,7 @@ int rsx_draw_engine_init(u32 width, u32 height)
      sink.inline_array     = sink_inline_array;
      sink.flip             = sink_flip;
      rsx_dispatch_init(&g.rsx, &sink);
@@ -15430,7 +15445,7 @@ index 9a76e67b..7b415ee8 100644
      g.ready = 1;
      fprintf(stderr, "[rsx engine] register-file draw engine up (%ux%u)\n",
              g.width, g.height);
-@@ -2531,6 +5426,102 @@ void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
+@@ -2531,6 +5434,102 @@ void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
      d->valid = width && height;
  }
  
@@ -17149,7 +17164,7 @@ index aee795c9..5845a3fa 100644
  
  /* The clear colour most recently set via NV4097_SET_COLOR_CLEAR_VALUE, in the
 diff --git a/libs/video/rsx_metal_backend.m b/libs/video/rsx_metal_backend.m
-index 98db2857..64f36a9e 100644
+index 98db2857..db94b25b 100644
 --- a/libs/video/rsx_metal_backend.m
 +++ b/libs/video/rsx_metal_backend.m
 @@ -48,11 +48,39 @@
@@ -17207,7 +17222,7 @@ index 98db2857..64f36a9e 100644
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -79,6 +115,500 @@
+@@ -79,6 +115,501 @@
  static u32                 s_width  = 1280;
  static u32                 s_height = 720;
  
@@ -17258,7 +17273,7 @@ index 98db2857..64f36a9e 100644
 + *                        if MPS is missing or fails (one log line). */
 +static int   s_gfx_aniso;              /* 0 = off, else 2..16 */
 +static int   s_gfx_fxaa;
-+static int   s_gfx_smaa;               /* PS3_AA=smaa (FXAA and SMAA are exclusive) */
++static int   s_gfx_smaa;               /* both on: smaa-fxaa hybrid */
 +static float s_gfx_sharpen;            /* 0 = off */
 +static float s_gfx_vibrance;           /* 0 = off, -1..1 */
 +static float s_gfx_contrast = 1.0f;    /* 1 = off, 0.5..1.5 */
@@ -17375,8 +17390,9 @@ index 98db2857..64f36a9e 100644
 +    if (*e) a = atoi(e);
 +    __atomic_store_n(&s_gfx_aniso, a <= 1 ? 0 : a > 16 ? 16 : a, __ATOMIC_RELAXED);
 +    { const char* aa = ps3_toggle_str(PS3T_AA, buf, sizeof buf);
-+      s_gfx_fxaa = !strcasecmp(aa, "fxaa");
-+      s_gfx_smaa = !strcasecmp(aa, "smaa"); }
++      const int hybrid = !strcasecmp(aa, "smaa-fxaa");
++      s_gfx_fxaa = hybrid || !strcasecmp(aa, "fxaa");
++      s_gfx_smaa = hybrid || !strcasecmp(aa, "smaa"); }
 +    e = ps3_toggle_str(PS3T_SHARPEN, buf, sizeof buf);
 +    const double v = *e ? strtod(e, NULL) : 0.0;
 +    s_gfx_sharpen = !(v > 0.0) ? 0.0f : v > 1.0 ? 1.0f : (float)v;
@@ -17582,7 +17598,7 @@ index 98db2857..64f36a9e 100644
 +        s_gfx_clarity != 0.0f || s_gfx_lut_preset)
 +        fprintf(stderr, "[RSX metal] graphics: anisotropic %dx, AA %s, sharpen %.2f, upscale %s,"
 +                        " vibrance %.2f, contrast %.2f, curves %.2f/%.2f/%.2f, clarity %.2f, LUT preset %s\n",
-+                s_gfx_aniso ? s_gfx_aniso : 1, s_gfx_fxaa ? "FXAA" : s_gfx_smaa ? "SMAA" : "off",
++                s_gfx_aniso ? s_gfx_aniso : 1, s_gfx_fxaa && s_gfx_smaa ? "SMAA+FXAA" : s_gfx_fxaa ? "FXAA" : s_gfx_smaa ? "SMAA" : "off",
 +                (double)s_gfx_sharpen, s_gfx_upscale ? "MetalFX spatial" : "off",
 +                (double)s_gfx_vibrance, (double)s_gfx_contrast, (double)s_gfx_shadows,
 +                (double)s_gfx_midtones, (double)s_gfx_highlights, (double)s_gfx_clarity,
@@ -17708,7 +17724,7 @@ index 98db2857..64f36a9e 100644
  /* ---- vertex layout ----------------------------------------------------------
   * Every draw carries all 16 RSX vertex attributes as float4, fetched on the
   * CPU by rsx_fetch_attrib: 256 bytes per vertex, attribute i at offset i*16.
-@@ -451,8 +981,8 @@ static int create_offscreen(void)
+@@ -451,8 +982,8 @@ static int create_offscreen(void)
  {
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
@@ -17719,7 +17735,7 @@ index 98db2857..64f36a9e 100644
                                                         mipmapped:NO];
      td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
      s_offscreen = [s_dev newTextureWithDescriptor:td];
-@@ -460,13 +990,300 @@ static int create_offscreen(void)
+@@ -460,13 +991,300 @@ static int create_offscreen(void)
  }
  
  #if !TARGET_OS_IPHONE
@@ -18022,7 +18038,7 @@ index 98db2857..64f36a9e 100644
          initWithContentRect:frame
                    styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                               NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
-@@ -475,20 +1292,61 @@ static int create_window_impl(const char* title)
+@@ -475,20 +1293,61 @@ static int create_window_impl(const char* title)
      if (!s_window) return -1;
  
      [s_window setTitle:[NSString stringWithUTF8String:(title ? title : "ps3recomp")]];
@@ -18085,7 +18101,7 @@ index 98db2857..64f36a9e 100644
      return 0;
  }
  
-@@ -715,7 +1573,7 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
+@@ -715,7 +1574,7 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
              fn = compile_guest_function(s_msl, name);
          }
      }
@@ -18094,7 +18110,7 @@ index 98db2857..64f36a9e 100644
          fprintf(stderr, "[RSX metal] vertex program %08X: %d instrs -> %s\n",
                  hash, ni, fn ? "ok" : "FAILED (built-in shader instead)"); }
  
-@@ -742,6 +1600,23 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
+@@ -742,6 +1601,23 @@ static int vp_slot_for(const rsx_state* st, u32 vtex_mask)
   * and sampled with a direction rather than a 2D coordinate, so it changes the
   * compiled program and belongs in the key -- the D3D12 backend's PSO key
   * carries cube_mask for the same reason. */
@@ -18118,7 +18134,7 @@ index 98db2857..64f36a9e 100644
  static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
  {
      if (!vm_base || st->shader_program == 0) return -1;
-@@ -752,6 +1627,8 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
+@@ -752,6 +1628,8 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
  
      u64 key = rsx_fp_structural_hash(*uc, MTL_FP_MAX_BYTES, 1469598103934665603ull);
      if (!key) return -1;                    /* malformed or unterminated */
@@ -18127,7 +18143,7 @@ index 98db2857..64f36a9e 100644
      const u32 ctrl      = st->shader_control;
      const u32 ctrl_key  = ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS;
      const u32 alpha_en  = (st->alpha_test_enable && st->alpha_func != 0x0207u) ? 1u : 0u;
-@@ -761,15 +1638,20 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
+@@ -761,15 +1639,20 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
      key = fnv1a64(&alpha_fn, sizeof alpha_fn, key);
      key = fnv1a64(&cube_mask, sizeof cube_mask, key);
  
@@ -18152,7 +18168,7 @@ index 98db2857..64f36a9e 100644
      if (ni > 0 && alpha_en &&
          rsx_fp_apply_alpha_test_buffered(s_hlsl, sizeof s_hlsl, st->alpha_func) < 0)
          ni = -1;
-@@ -790,16 +1672,17 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
+@@ -790,16 +1673,17 @@ static int fp_slot_for(const rsx_state* st, const u8** uc, u32 cube_mask)
              fn = compile_guest_function(s_msl, name);
          }
      }
@@ -18173,7 +18189,7 @@ index 98db2857..64f36a9e 100644
  }
  
  /* Reserve `bytes` of constant staging at a 256-byte boundary. */
-@@ -828,24 +1711,27 @@ static int cb_alloc(u32 bytes, u32* off)
+@@ -828,24 +1712,27 @@ static int cb_alloc(u32 bytes, u32* off)
   * outputs do not link with the built-in fragment shader's inputs. */
  static int guest_programs_for(const rsx_state* st, MtlDraw* d)
  {
@@ -18206,7 +18222,7 @@ index 98db2857..64f36a9e 100644
  
      /* VPConst: the 512 transform constants, then the viewport epilogue
       * (see the D3D12 backend's vp_record_cb): x/y identity, and the z lane
-@@ -1084,7 +1970,7 @@ static int tex_slot_for(const rsx_texture_state* t)
+@@ -1084,7 +1971,7 @@ static int tex_slot_for(const rsx_texture_state* t)
  
      id<MTLTexture> tex = upload_texture(vm_base + ea, w, h, fmt, t->control1,
                                          levels, pitch, cube);
@@ -18215,7 +18231,7 @@ index 98db2857..64f36a9e 100644
          fprintf(stderr, "[RSX metal] texture %ux%u fmt 0x%02X %u level(s)%s at 0x%08X (%s) -> %s\n",
                  w, h, fmt, levels ? levels : 1u, cube ? " cube" : "", ea,
                  (t->format & 3u) == 1u ? "local" : "main",
-@@ -1279,7 +2165,7 @@ static int surface_get(u32 off, u32 w, u32 h, u32 fmt)
+@@ -1279,7 +2166,7 @@ static int surface_get(u32 off, u32 w, u32 h, u32 fmt)
      td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead |
                 MTLTextureUsagePixelFormatView;
      id<MTLTexture> tex = [s_dev newTextureWithDescriptor:td];
@@ -18224,7 +18240,7 @@ index 98db2857..64f36a9e 100644
          fprintf(stderr, "[RSX metal] surface 0x%08X %ux%u fmt 0x%02X -> %s\n",
                  off, w, h, fmt & 0x1Fu, tex ? "ok" : "FAILED"); }
  
-@@ -1401,7 +2287,7 @@ static void textures_for(const rsx_state* st, MtlDraw* d)
+@@ -1401,7 +2288,7 @@ static void textures_for(const rsx_state* st, MtlDraw* d)
          if (surf >= 0) {
              d->samp[u] = samp_slot_for(t);
              if (rt_is_own_target(d, t->offset)) {
@@ -18233,7 +18249,7 @@ index 98db2857..64f36a9e 100644
                      fprintf(stderr, "[RSX metal] unit %u samples the surface the pass "
                                      "draws into (0x%08X); reading the zero texture\n",
                              u, t->offset); }
-@@ -1581,7 +2467,8 @@ static void record_draw(const rsx_state* st, u32 prim, u32 base, u32 count,
+@@ -1581,7 +2468,8 @@ static void record_draw(const rsx_state* st, u32 prim, u32 base, u32 count,
       * drops to the built-in shader must still fetch its vertices the same
       * way. Constant staging reserved here for a draw that then fails on
       * vertices is simply left unused until the frame resets it. */
@@ -18243,7 +18259,7 @@ index 98db2857..64f36a9e 100644
      if (guest) textures_for(st, d);
  
      u32 first_vert = s_vert_count;
-@@ -2042,7 +2929,11 @@ static void release_surfaces(void)
+@@ -2042,7 +2930,11 @@ static void release_surfaces(void)
  
  #include "rsx_draw_engine.h"
  
@@ -18256,7 +18272,7 @@ index 98db2857..64f36a9e 100644
  #define ENG_MAX_PIPES    4096
  #define ENG_MAX_RECORDS  65536   /* inFamous world frames issue >9k records */
  #define ENG_MAX_VIEWS    256
-@@ -2060,28 +2951,64 @@ static void release_surfaces(void)
+@@ -2060,28 +2952,64 @@ static void release_surfaces(void)
  static u32 s_eng_obj_count;
  static u32 s_eng_obj_free[ENG_MAX_OBJECTS];
  static u32 s_eng_obj_free_count;
@@ -18325,7 +18341,7 @@ index 98db2857..64f36a9e 100644
  
  typedef struct { u32 surface, remap, format, view; } EngView;
  static EngView s_eng_view[ENG_MAX_VIEWS];
-@@ -2089,7 +3016,7 @@ static void release_surfaces(void)
+@@ -2089,7 +3017,7 @@ static void release_surfaces(void)
  
  typedef enum {
      ENG_REC_DRAW, ENG_REC_CLEAR_COLOR, ENG_REC_CLEAR_DS, ENG_REC_DEPTH_RESOLVE,
@@ -18334,7 +18350,7 @@ index 98db2857..64f36a9e 100644
  } EngRecKind;
  
  typedef struct {
-@@ -2102,7 +3029,9 @@ static void release_surfaces(void)
+@@ -2102,7 +3030,9 @@ static void release_surfaces(void)
      u32 pipeline;
      MTLPrimitiveType topology;
      u32 vb_off, stride, vertex_count;
@@ -18344,7 +18360,7 @@ index 98db2857..64f36a9e 100644
      u32 vs_cb_off, vs_cb_bytes;
      float vs_xf[8];             /* VPXform (buffer 2): vp_posscale, vp_posoffset */
      u32 ps_cb_off, ps_cb_bytes;
-@@ -2113,6 +3042,8 @@ static void release_surfaces(void)
+@@ -2113,6 +3043,8 @@ static void release_surfaces(void)
      float vp[4];
      u32   sc[4];
      u32   stencil_ref;
@@ -18353,7 +18369,7 @@ index 98db2857..64f36a9e 100644
      float clear_rgba[4];
      u32   clear_flags;
      float clear_depth;
-@@ -2120,8 +3051,15 @@ static void release_surfaces(void)
+@@ -2120,8 +3052,15 @@ static void release_surfaces(void)
      u32   resolve_dst;          /* ENG_REC_DEPTH_RESOLVE target texture */
  } EngRecord;
  
@@ -18370,7 +18386,7 @@ index 98db2857..64f36a9e 100644
  static u32 s_eng_dropped;
  
  static u8* s_eng_stage;
-@@ -2158,6 +3096,36 @@ static void release_surfaces(void)
+@@ -2158,6 +3097,36 @@ static void release_surfaces(void)
  static id<MTLRenderPipelineState> s_eng_depth_pso;
  static id<MTLRenderPipelineState> s_eng_depth_rgba_pso;
  static id<MTLSamplerState>        s_eng_point_sampler;
@@ -18407,7 +18423,7 @@ index 98db2857..64f36a9e 100644
  
  static NSString* const kEngHelperMSL = @
  "#include <metal_stdlib>\n"
-@@ -2174,17 +3142,454 @@ static void release_surfaces(void)
+@@ -2174,17 +3143,455 @@ static void release_surfaces(void)
  "                            sampler s [[sampler(0)]]) {\n"
  "    return src.sample(s, i.uv);\n"
  "}\n"
@@ -18508,8 +18524,9 @@ index 98db2857..64f36a9e 100644
 +"fragment float4 eng_fxaa_fs(BOut i [[stage_in]],\n"
 +"                            texture2d<float> t [[texture(0)]],\n"
 +"                            sampler s [[sampler(0)]],\n"
-+"                            constant float2& rcp [[buffer(0)]]) {\n"
-+"    const float subpix = 0.75, thr = 0.166, thr_min = 0.0833;\n"
++"                            constant float4& params [[buffer(0)]]) {\n"
++"    float2 rcp = params.xy;\n"
++"    const float subpix = 0.75; float thr = params.z, thr_min = params.w;\n"
 +"    float2 posM = i.uv;\n"
 +"    float4 rgbyM = t.sample(s, posM);\n"
 +"    float lumaM = fx_l(rgbyM.rgb);\n"
@@ -18866,7 +18883,7 @@ index 98db2857..64f36a9e 100644
  
  static u32 eng_obj_add(id<MTLTexture> t)
  {
-@@ -2193,10 +3598,15 @@ static u32 eng_obj_add(id<MTLTexture> t)
+@@ -2193,10 +3600,15 @@ static u32 eng_obj_add(id<MTLTexture> t)
      if (s_eng_obj_free_count) {
          slot = s_eng_obj_free[--s_eng_obj_free_count];
      } else {
@@ -18883,7 +18900,7 @@ index 98db2857..64f36a9e 100644
      return slot + 1;
  }
  
-@@ -2205,14 +3615,37 @@ static u32 eng_obj_add(id<MTLTexture> t)
+@@ -2205,14 +3617,37 @@ static u32 eng_obj_add(id<MTLTexture> t)
      return (handle && handle <= s_eng_obj_count) ? s_eng_obj[handle - 1] : nil;
  }
  
@@ -18923,7 +18940,7 @@ index 98db2857..64f36a9e 100644
          s_eng_obj_retired[i] = 0;
          s_eng_obj[i] = nil;
          s_eng_obj_free[s_eng_obj_free_count++] = i;
-@@ -2224,7 +3657,7 @@ static void eng_obj_release(void* user, u32 handle)
+@@ -2224,7 +3659,7 @@ static void eng_obj_release(void* user, u32 handle)
      (void)user;
      if (!handle || handle > s_eng_obj_count || !s_eng_obj[handle - 1] ||
          s_eng_obj_retired[handle - 1]) return;
@@ -18932,7 +18949,7 @@ index 98db2857..64f36a9e 100644
      /* Any view cut from this object stops being valid with it. */
      for (u32 i = 0; i < s_eng_view_count; i++)
          if (s_eng_view[i].surface == handle) {
-@@ -2332,12 +3765,19 @@ static int eng_init(void* user, u32 width, u32 height)
+@@ -2332,12 +3767,19 @@ static int eng_init(void* user, u32 width, u32 height)
      sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
      sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
      s_eng_point_sampler = [s_dev newSamplerStateWithDescriptor:sd];
@@ -18953,7 +18970,7 @@ index 98db2857..64f36a9e 100644
      for (u32 i = 0; i < s_eng_obj_count; i++) s_eng_obj[i] = nil;
      for (u32 i = 0; i < s_eng_pipe_count; i++) {
          s_eng_pipe[i].pso = nil;
-@@ -2348,6 +3788,7 @@ static void eng_shutdown(void* user)
+@@ -2348,6 +3790,7 @@ static void eng_shutdown(void* user)
      s_eng_obj_count = s_eng_obj_free_count = 0;
      memset(s_eng_obj_retired, 0, sizeof s_eng_obj_retired);
      s_eng_pipe_count = s_eng_func_count = s_eng_samp_count = s_eng_view_count = 0;
@@ -18961,7 +18978,7 @@ index 98db2857..64f36a9e 100644
      s_eng_rec_count = 0;
      for (int k = 0; k < ENG_STAGE_SLOTS; k++) { s_eng_slot_buf[k] = nil; s_eng_slot_busy[k] = 0; }
      s_eng_slot = -1;
-@@ -2357,12 +3798,16 @@ static void eng_shutdown(void* user)
+@@ -2357,12 +3800,16 @@ static void eng_shutdown(void* user)
      s_eng_blit_pso = nil;
      s_eng_depth_pso = nil;
      s_eng_point_sampler = nil;
@@ -18979,7 +18996,7 @@ index 98db2857..64f36a9e 100644
      eng_encode_and_commit(nil);
  }
  
-@@ -2405,14 +3850,52 @@ static void eng_texture_upload(void* user, u32 handle, u32 face, u32 mip,
+@@ -2405,14 +3852,52 @@ static void eng_texture_upload(void* user, u32 handle, u32 face, u32 mip,
         bytesPerImage:0];
  }
  
@@ -19033,7 +19050,7 @@ index 98db2857..64f36a9e 100644
                                                         mipmapped:NO];
      /* PixelFormatView because a unit sampling this target wears its own
       * TEXTURE_CONTROL1 crossbar as a view swizzle. */
-@@ -2420,10 +3903,29 @@ static u32 eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32 h,
+@@ -2420,10 +3905,29 @@ static u32 eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32 h,
                 MTLTextureUsagePixelFormatView;
      id<MTLTexture> t = [s_dev newTextureWithDescriptor:td];
      if (!t) return 0;
@@ -19065,7 +19082,7 @@ index 98db2857..64f36a9e 100644
  }
  
  static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
-@@ -2446,7 +3948,7 @@ static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
+@@ -2446,7 +3950,7 @@ static u32 eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
                                   swizzle:MTLTextureSwizzleChannelsMake(
                                               swizzle_sel(sel[1]), swizzle_sel(sel[2]),
                                               swizzle_sel(sel[3]), swizzle_sel(sel[0]))];
@@ -19074,7 +19091,7 @@ index 98db2857..64f36a9e 100644
      if (!handle) return 0;
      s_eng_view[s_eng_view_count].surface = surface;
      s_eng_view[s_eng_view_count].remap   = remap;
-@@ -2462,13 +3964,15 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
+@@ -2462,13 +3966,15 @@ static u32 eng_depth_target_create(void* user, u32 w, u32 h)
      if (!s_dev || !w || !h) return 0;
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTL_DEPTH_FORMAT
@@ -19094,7 +19111,7 @@ index 98db2857..64f36a9e 100644
  }
  
  /* The sampleable copy of a depth target. The copy is a record in the stream,
-@@ -2494,10 +3998,10 @@ static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
+@@ -2494,10 +4000,10 @@ static u32 eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
      }
      MTLTextureDescriptor* td =
          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR32Float
@@ -19107,7 +19124,7 @@ index 98db2857..64f36a9e 100644
      if (!dst) return 0;
  
      EngRecord* r = &s_eng_rec[s_eng_rec_count++];
-@@ -2539,7 +4043,7 @@ static u32 eng_color_snapshot(void* user, u32 surface)
+@@ -2539,7 +4045,7 @@ static u32 eng_color_snapshot(void* user, u32 surface)
                                                             mipmapped:NO];
          td.usage       = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView | MTLTextureUsageRenderTarget;
          td.storageMode = MTLStorageModePrivate;
@@ -19116,7 +19133,7 @@ index 98db2857..64f36a9e 100644
          if (!dst) return 0;
          u32 slot = s_eng_csnap_count;
          for (u32 i = 0; i < s_eng_csnap_count; i++) if (!s_eng_csnap[i].src) { slot = i; break; }
-@@ -2556,6 +4060,141 @@ static u32 eng_color_snapshot(void* user, u32 surface)
+@@ -2556,6 +4062,141 @@ static u32 eng_color_snapshot(void* user, u32 surface)
      return dst;
  }
  
@@ -19258,7 +19275,7 @@ index 98db2857..64f36a9e 100644
  static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
  {
      (void)user;
-@@ -2575,23 +4214,33 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
+@@ -2575,23 +4216,33 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
          }
      }
      /* One persistent decode target per depth target: each resolve record
@@ -19298,7 +19315,7 @@ index 98db2857..64f36a9e 100644
      }
      EngRecord* r = &s_eng_rec[s_eng_rec_count++];
      memset(r, 0, sizeof *r);
-@@ -2602,37 +4251,406 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
+@@ -2602,37 +4253,406 @@ static u32 eng_depth_snapshot_rgba8(void* user, u32 depth, u32 w, u32 h)
      return dst;
  }
  
@@ -19733,7 +19750,7 @@ index 98db2857..64f36a9e 100644
   * rows its program reads (eng_bind_vs_constants_range). The VPConst text is
   * the one the VP decompiler and the engine's fixed-function shader both
   * emit; anything else is refused rather than run against the wrong layout. */
-@@ -2694,11 +4712,25 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2694,11 +4714,25 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
                      "epilogue is bound separately)\n");
          return 0;
      }
@@ -19764,7 +19781,7 @@ index 98db2857..64f36a9e 100644
  
      /* Attribute index is the layout SLOT, not the guest's ATTRn number.
       * glslang numbers an HLSL input struct's members in DECLARATION order --
-@@ -2727,17 +4759,42 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2727,17 +4761,42 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
      if ((rs->color_mask >>  8) & 0xFF) wm |= MTLColorWriteMaskGreen;
      if ((rs->color_mask >> 16) & 0xFF) wm |= MTLColorWriteMaskRed;
      if ((rs->color_mask >> 24) & 0xFF) wm |= MTLColorWriteMaskAlpha;
@@ -19815,7 +19832,7 @@ index 98db2857..64f36a9e 100644
              ca.blendingEnabled             = YES;
              ca.sourceRGBBlendFactor        = blend_factor_to_metal(rs->sf_rgb);
              ca.destinationRGBBlendFactor   = blend_factor_to_metal(rs->df_rgb);
-@@ -2748,13 +4805,17 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2748,13 +4807,17 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
          }
      }
  
@@ -19840,7 +19857,7 @@ index 98db2857..64f36a9e 100644
      }
  
      /* Depth and stencil are pipeline state in D3D12 and an encoder object in
-@@ -2787,11 +4848,13 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2787,11 +4850,13 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
          }
      }
      id<MTLDepthStencilState> ds = [s_dev newDepthStencilStateWithDescriptor:dd];
@@ -19855,7 +19872,7 @@ index 98db2857..64f36a9e 100644
      /* CULL_FACE FRONT=0x0404 BACK=0x0405 FRONT_AND_BACK=0x0408 (front here,
       * as in the D3D12 engine); FRONT_FACE CW=0x0900 CCW=0x0901. */
      s_eng_pipe[slot].cull = MTLCullModeNone;
-@@ -2801,21 +4864,50 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
+@@ -2801,21 +4866,50 @@ static u32 eng_pipeline_create(void* user, const char* vs_hlsl, const char* ps_h
                                      : (rs->cull_face == 0x0405u ? MTLCullModeBack
                                                                  : MTLCullModeNone);
      snprintf(s_eng_pipe[slot].desc, sizeof s_eng_pipe[slot].desc,
@@ -19908,7 +19925,7 @@ index 98db2857..64f36a9e 100644
          s_eng_pipe[pipeline - 1].pso = nil;
          s_eng_pipe[pipeline - 1].ds  = nil;
      }
-@@ -2823,16 +4915,32 @@ static void eng_pipeline_release(void* user, u32 pipeline)
+@@ -2823,16 +4917,32 @@ static void eng_pipeline_release(void* user, u32 pipeline)
  
  /* ---- per-draw binding ---------------------------------------------------- */
  
@@ -19944,7 +19961,7 @@ index 98db2857..64f36a9e 100644
      if (s_eng_samp_count >= ENG_MAX_SAMPLERS) return -1;
      MTLSamplerDescriptor* sd = [MTLSamplerDescriptor new];
      sd.minFilter = d->min_linear ? MTLSamplerMinMagFilterLinear
-@@ -2847,12 +4955,23 @@ static int eng_sampler_slot(const rsx_be_sampler_desc* d)
+@@ -2847,12 +4957,23 @@ static int eng_sampler_slot(const rsx_be_sampler_desc* d)
      sd.sAddressMode = gcm_wrap_to_metal(d->wrap_s);
      sd.tAddressMode = gcm_wrap_to_metal(d->wrap_t);
      sd.rAddressMode = gcm_wrap_to_metal(d->wrap_r);
@@ -19969,7 +19986,7 @@ index 98db2857..64f36a9e 100644
      return slot;
  }
  
-@@ -2967,19 +5086,50 @@ static void eng_bind_vertex_textures(void* user, const u32* textures,
+@@ -2967,19 +5088,50 @@ static void eng_bind_vertex_textures(void* user, const u32* textures,
  static void eng_set_viewport(void* user, float x, float y, float w, float h)
  {
      (void)user;
@@ -20024,7 +20041,7 @@ index 98db2857..64f36a9e 100644
  
  static void eng_draw(void* user, rsx_topology topology, const void* vertices,
                       u32 vertex_count, u32 stride, const u32* indices,
-@@ -2999,12 +5149,80 @@ static void eng_draw(void* user, rsx_topology topology, const void* vertices,
+@@ -2999,12 +5151,80 @@ static void eng_draw(void* user, rsx_topology topology, const void* vertices,
      r->kind         = ENG_REC_DRAW;
      r->topology     = topo_to_metal(topology);
      r->vb_off       = vb_off;
@@ -20105,7 +20122,7 @@ index 98db2857..64f36a9e 100644
  static void eng_clear_color(void* user, u32 surface, const float rgba[4])
  {
      (void)user;
-@@ -3050,6 +5268,8 @@ static void eng_clear_depth_stencil(void* user, u32 depth, u32 flags,
+@@ -3050,6 +5270,8 @@ static void eng_clear_depth_stencil(void* user, u32 depth, u32 flags,
      const void* pso; const void* ds;
      int cull, winding;
      u32 stencil_ref;
@@ -20114,7 +20131,7 @@ index 98db2857..64f36a9e 100644
      int have_vp, have_sc;
      MTLViewport vp;
      MTLScissorRect sc;
-@@ -3068,10 +5288,134 @@ static void eng_bound_reset(void)
+@@ -3068,10 +5290,134 @@ static void eng_bound_reset(void)
  }
  #define ENG_PTR(o) ((__bridge const void*)(o))
  
@@ -20249,7 +20266,7 @@ index 98db2857..64f36a9e 100644
      /* PS3RECOMP_METAL_SKIP_PIPE=a,b,...: drop draws using those pipelines
       * (pass-log p= numbers) to bisect which pass breaks an image. */
      { static u32 skip[16]; static int nskip = -1;
-@@ -3079,6 +5423,10 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3079,6 +5425,10 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
            while (e && *e && nskip < 16) { skip[nskip++] = (u32)strtoul(e, (char**)&e, 10); if (*e == ',') e++; else break; } }
        for (int k = 0; k < nskip; k++) if (skip[k] == r->pipeline) return; }
      const EngPipeline* p = &s_eng_pipe[r->pipeline - 1];
@@ -20260,7 +20277,7 @@ index 98db2857..64f36a9e 100644
      if (!p->pso) return;
      EngBound* b = &s_eng_bound;
      if (b->pso != ENG_PTR(p->pso)) { [enc setRenderPipelineState:p->pso]; b->pso = ENG_PTR(p->pso); }
-@@ -3098,6 +5446,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3098,6 +5448,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
      }
      if (b->winding != (int)p->winding) { [enc setFrontFacingWinding:p->winding]; b->winding = (int)p->winding; }
      if (b->stencil_ref != r->stencil_ref) { [enc setStencilReferenceValue:r->stencil_ref]; b->stencil_ref = r->stencil_ref; }
@@ -20275,7 +20292,7 @@ index 98db2857..64f36a9e 100644
      MTLViewport vp = { r->vp[0], r->vp[1], r->vp[2], r->vp[3], 0.0, 1.0 };
      if (!b->have_vp || memcmp(&b->vp, &vp, sizeof vp)) { [enc setViewport:vp]; b->vp = vp; b->have_vp = 1; }
      if (r->sc[2] && r->sc[3]) {
-@@ -3105,7 +5461,15 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3105,7 +5463,15 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
          if (!b->have_sc || memcmp(&b->sc, &sc, sizeof sc)) { [enc setScissorRect:sc]; b->sc = sc; b->have_sc = 1; }
      }
      /* Same buffer, new offset: setVertexBufferOffset is the cheap form. */
@@ -20292,7 +20309,7 @@ index 98db2857..64f36a9e 100644
          [enc setVertexBuffer:stage offset:r->vb_off atIndex:MTL_VB_INDEX];
          b->buf[0] = ENG_PTR(stage); b->buf_off[0] = r->vb_off;
      } else if (b->buf_off[0] != r->vb_off) {
-@@ -3131,9 +5495,60 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3131,9 +5497,60 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
              [enc setFragmentBufferOffset:r->ps_cb_off atIndex:1]; b->fbuf_off = r->ps_cb_off;
          }
      }
@@ -20353,7 +20370,7 @@ index 98db2857..64f36a9e 100644
          id<MTLSamplerState> sm = r->samp[u] >= 0 ? s_eng_samp[r->samp[u]].samp : s_default_sampler;
          if (b->ftex[u] != ENG_PTR(t)) { [enc setFragmentTexture:t atIndex:(NSUInteger)u]; b->ftex[u] = ENG_PTR(t); }
          if (b->fsamp[u] != ENG_PTR(sm)) { [enc setFragmentSamplerState:sm atIndex:(NSUInteger)u]; b->fsamp[u] = ENG_PTR(sm); }
-@@ -3145,6 +5560,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3145,6 +5562,7 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
          if (b->vtex[u] != ENG_PTR(t)) { [enc setVertexTexture:t atIndex:MTL_VTEX_INDEX(u)]; b->vtex[u] = ENG_PTR(t); }
          if (b->vsamp[u] != ENG_PTR(sm)) { [enc setVertexSamplerState:sm atIndex:MTL_VSAMP_INDEX(u)]; b->vsamp[u] = ENG_PTR(sm); }
      }
@@ -20361,7 +20378,7 @@ index 98db2857..64f36a9e 100644
      /* An indexed draw is really indexed here: the index buffer is what keeps a
       * strip's shared vertices from being fetched and uploaded per triangle.
       * Only a rebuilt triangle list is ever indexed; points and lines arrive as
-@@ -3182,7 +5598,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
+@@ -3182,7 +5600,14 @@ static void eng_encode_draw(id<MTLRenderCommandEncoder> enc, const EngRecord* r,
                return;
            }
        } }
@@ -20377,7 +20394,7 @@ index 98db2857..64f36a9e 100644
          [enc drawIndexedPrimitives:r->topology
                          indexCount:r->index_count
                           indexType:MTLIndexTypeUInt32
-@@ -3201,26 +5624,122 @@ static int eng_record_targets_are(const EngRecord* r, const u32* rt, u32 nrt)
+@@ -3201,26 +5626,122 @@ static int eng_record_targets_are(const EngRecord* r, const u32* rt, u32 nrt)
      return 1;
  }
  
@@ -20505,7 +20522,7 @@ index 98db2857..64f36a9e 100644
              id<MTLTexture> src = eng_obj(r->depth);
              id<MTLTexture> dst = eng_obj(r->resolve_dst);
              id<MTLRenderPipelineState> pso = r->clear_flags ? s_eng_depth_rgba_pso : s_eng_depth_pso;
-@@ -3231,8 +5750,20 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3231,8 +5752,20 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
              rp.colorAttachments[0].storeAction = MTLStoreActionStore;
              id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
              if (!e) continue;
@@ -20526,7 +20543,7 @@ index 98db2857..64f36a9e 100644
              [e setFragmentSamplerState:s_eng_point_sampler atIndex:0];
              [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
              [e endEncoding];
-@@ -3243,6 +5774,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3243,6 +5776,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * surface and an MRT set arrives as one clear per target, so they are
           * collected rather than compared: they become load actions on the
           * pass below when the draw that follows writes the same targets. */
@@ -20534,7 +20551,7 @@ index 98db2857..64f36a9e 100644
          u32 n_cc = 0;
          u32 cc_surf[RSX_BE_MAX_COLOR_TARGETS];
          float cc_rgba[RSX_BE_MAX_COLOR_TARGETS][4];
-@@ -3250,10 +5782,12 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3250,10 +5784,12 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
          u32 cd = 0, ds_flags = 0;
          float cdepth = 1.0f;
          u8 cstencil = 0;
@@ -20551,7 +20568,7 @@ index 98db2857..64f36a9e 100644
              if (r->kind == ENG_REC_CLEAR_COLOR) {
                  u32 k = 0;
                  while (k < n_cc && cc_surf[k] != r->rt[0]) k++;
-@@ -3281,9 +5815,10 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3281,9 +5817,10 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
          u32 nrt = n_cc;
          for (u32 k = 0; k < n_cc; k++) rt[k] = cc_surf[k];
          u32 depth = have_clear_ds ? cd : 0;
@@ -20565,7 +20582,7 @@ index 98db2857..64f36a9e 100644
              int covered = 1;
              for (u32 k = 0; k < n_cc && covered; k++) {
                  int found = 0;
-@@ -3292,12 +5827,23 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3292,12 +5829,23 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
                  covered = found;
              }
              if (covered) {
@@ -20589,7 +20606,7 @@ index 98db2857..64f36a9e 100644
          /* Metal wants every attachment the same size, and the engine registers
           * an MRT set's members at target A's, so a set whose members disagree
           * is one this frame cannot honour: it stops at the gap, as the vtable
-@@ -3312,7 +5858,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3312,7 +5860,7 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
              tex[attach++] = t;
          }
          id<MTLTexture> zbuf = eng_obj(depth);
@@ -20598,7 +20615,7 @@ index 98db2857..64f36a9e 100644
          /* A pipeline always declares the depth attachment, so a draw pass
           * always has to have one; the display's shared buffer is the fallback
           * for a guest that never declared a zeta. */
-@@ -3359,40 +5905,329 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
+@@ -3359,40 +5907,337 @@ static void eng_encode_records(id<MTLCommandBuffer> cb, id<MTLBuffer> stage)
           * skips those draws rather than encoding a mismatch. */
          if (!enc || attach != nrt) {
              if (enc) [enc endEncoding];
@@ -20662,7 +20679,10 @@ index 98db2857..64f36a9e 100644
 +    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
 +    id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
 +    if (!e) return nil;
-+    const float rcp[2] = { 1.0f / (float)[src width], 1.0f / (float)[src height] };
++    /* Hybrid AA also catches low-contrast edges after the spatial scaler. */
++    const int hybrid = s_gfx_smaa && s_gfx_fxaa;
++    const float rcp[4] = { 1.0f / (float)[src width], 1.0f / (float)[src height],
++                          hybrid ? 0.0833f : 0.166f, hybrid ? 0.0312f : 0.0833f };
 +    [e setRenderPipelineState:s_gfx_fxaa_pso];
 +    [e setFragmentTexture:src atIndex:0];
 +    [e setFragmentSamplerState:s_eng_linear_sampler atIndex:0];
@@ -20913,8 +20933,9 @@ index 98db2857..64f36a9e 100644
 +        __atomic_store_n(&s_gfx_dirty, 0, __ATOMIC_RELAXED);
 +        gfx_options_read();
 +    }
-+    if (s_gfx_fxaa) { id<MTLTexture> t = gfx_fxaa(cb, src); if (t) src = t; }
-+    else if (s_gfx_smaa) { id<MTLTexture> t = gfx_smaa(cb, src); if (t) src = t; }
++    const int hybrid = s_gfx_smaa && s_gfx_fxaa;
++    if (s_gfx_smaa) { id<MTLTexture> t = gfx_smaa(cb, src); if (t) src = t; }
++    else if (s_gfx_fxaa) { id<MTLTexture> t = gfx_fxaa(cb, src); if (t) src = t; }
 +    const int scaling = ([src width] != [dst width] || [src height] != [dst height]);
 +    if (scaling && __atomic_load_n(&s_gfx_upscale_on, __ATOMIC_ACQUIRE) &&
 +        [dst width] > [src width] && [dst height] > [src height]) {
@@ -20925,6 +20946,10 @@ index 98db2857..64f36a9e 100644
 +        id<MTLTexture> t = gfx_lanczos(cb, src, [dst width], [dst height]);
 +        if (t) { src = t; done |= ENG_BLIT_REDUCED; }
 +    }
++    /* SMAA first preserves geometry edges at the internal resolution. The
++     * hybrid's second pass runs AFTER scaling, where spatial reconstruction
++     * can introduce fresh stair steps that source-resolution AA cannot see. */
++    if (hybrid) { id<MTLTexture> t = gfx_fxaa(cb, src); if (t) src = t; }
      if (!s_eng_blit_pso || s_eng_blit_pso_fmt != [dst pixelFormat]) {
          MTLRenderPipelineDescriptor* pd = [MTLRenderPipelineDescriptor new];
          pd.vertexFunction   = [s_eng_helper_lib newFunctionWithName:@"eng_fullscreen_vs"];
@@ -20941,7 +20966,7 @@ index 98db2857..64f36a9e 100644
          }
          s_eng_blit_pso_fmt = [dst pixelFormat];
      }
-@@ -3401,12 +6236,56 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
+@@ -3401,12 +6246,56 @@ static void eng_blit_to_display(id<MTLCommandBuffer> cb, id<MTLTexture> src,
      rp.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
      rp.colorAttachments[0].storeAction = MTLStoreActionStore;
      id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];
@@ -21000,7 +21025,7 @@ index 98db2857..64f36a9e 100644
  }
  
  /* Encode everything recorded so far and commit it.
-@@ -3437,50 +6316,88 @@ static void eng_pt_report(void)
+@@ -3437,50 +6326,88 @@ static void eng_pt_report(void)
      if (!t0) t0 = now;
      if (now - t0 < 10000000000ull) return;
      fprintf(stderr, "[rsx present] %u presents: in-flight wait %.0f ms, nextDrawable %.0f ms,"
@@ -21106,7 +21131,7 @@ index 98db2857..64f36a9e 100644
                      fprintf(stderr, "[pass] %5u x%-4u kind=%d rt=", i, j - i, (int)r->kind);
                      for (u32 k = 0; k < r->nrt; k++) fprintf(stderr, "%s%u", k ? "," : "", r->rt[k]);
                      fprintf(stderr, " depth=%u", r->depth);
-@@ -3498,19 +6415,56 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3498,19 +6425,56 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
                      i = j;
                  }
              }
@@ -21168,7 +21193,7 @@ index 98db2857..64f36a9e 100644
                  if (busy) __atomic_store_n(busy, 0, __ATOMIC_RELEASE);
                  dispatch_semaphore_signal(sem);
              }];
-@@ -3518,39 +6472,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
+@@ -3518,39 +6482,166 @@ static void eng_encode_and_commit(id<MTLTexture> present_dst)
              s_pt_ns[3] += eng_pt_now() - pt;
              s_pt_n++;
              eng_pt_report();
@@ -21347,7 +21372,7 @@ index 98db2857..64f36a9e 100644
          id<MTLCommandBuffer> fence = [s_queue commandBuffer];
          [fence commit];
          [fence waitUntilCompleted];
-@@ -3580,7 +6661,11 @@ static void eng_dump_frame(id<MTLTexture> src)
+@@ -3580,7 +6671,11 @@ static void eng_dump_frame(id<MTLTexture> src)
              fwrite(rgb, 1, 3, f);
          }
          fclose(f);
@@ -21360,7 +21385,7 @@ index 98db2857..64f36a9e 100644
      }
      free(rgba);
  }
-@@ -3596,14 +6681,31 @@ static float eng_half_to_float(uint16_t h)
+@@ -3596,14 +6691,31 @@ static float eng_half_to_float(uint16_t h)
      else f = (s << 31) | ((e + 112) << 23) | (m << 13);
      float r; memcpy(&r, &f, 4); return r;
  }
@@ -21394,7 +21419,7 @@ index 98db2857..64f36a9e 100644
      for (u32 h = 1; h <= s_eng_obj_count; ++h) {
          id<MTLTexture> t = s_eng_obj[h - 1];
          /* PS3RECOMP_METAL_SURF_DUMP_EXTRA=h,h,...: also dump these handles even if
-@@ -3659,6 +6761,26 @@ static void eng_dump_surfaces(void)
+@@ -3659,6 +6771,26 @@ static void eng_dump_surfaces(void)
              }
              fclose(f);
          }
@@ -21421,7 +21446,7 @@ index 98db2857..64f36a9e 100644
          free(px);
      }
      fprintf(stderr, "[rsx engine/metal] dumped render targets for frame %u to %s\n", frame, dir);
-@@ -3671,48 +6793,189 @@ static void eng_present(void* user, u32 surface)
+@@ -3671,48 +6803,189 @@ static void eng_present(void* user, u32 surface)
      if (!src) { eng_encode_and_commit(nil); return; }
      const u32 nrec = s_eng_rec_count;
      eng_encode_and_commit(src);
@@ -21633,7 +21658,7 @@ index 98db2857..64f36a9e 100644
      .color_target_create  = eng_color_target_create,
      .color_target_release = eng_obj_release,
      .surface_view         = eng_surface_view,
-@@ -3721,6 +6984,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3721,6 +6994,8 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .depth_snapshot       = eng_depth_snapshot,
      .color_snapshot       = eng_color_snapshot,
      .depth_snapshot_rgba8 = eng_depth_snapshot_rgba8,
@@ -21642,7 +21667,7 @@ index 98db2857..64f36a9e 100644
      .pipeline_create      = eng_pipeline_create,
      .pipeline_release     = eng_pipeline_release,
      .bind_targets         = eng_bind_targets,
-@@ -3733,7 +6998,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
+@@ -3733,7 +7008,14 @@ static void eng_readback(void* user, u32 surface, u32 x, u32 y, u32 w, u32 h,
      .set_viewport         = eng_set_viewport,
      .set_scissor          = eng_set_scissor,
      .set_stencil_ref      = eng_set_stencil_ref,
@@ -21657,7 +21682,7 @@ index 98db2857..64f36a9e 100644
      .clear_color          = eng_clear_color,
      .clear_depth_stencil  = eng_clear_depth_stencil,
      .present              = eng_present,
-@@ -3750,12 +7022,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3750,12 +7032,17 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  
          const char* hl = getenv("PS3RECOMP_METAL_HEADLESS");
          s_headless = (hl && *hl && *hl != '0');
@@ -21675,7 +21700,7 @@ index 98db2857..64f36a9e 100644
          s_queue = [s_dev newCommandQueue];
          if (!s_queue) {
              fprintf(stderr, "[RSX metal] could not create command queue\n");
-@@ -3822,9 +7099,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3822,9 +7109,22 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
          if (rsx_draw_engine_enabled() &&
              rsx_draw_engine_init(s_width, s_height) == 0) {
              s_eng_active = 1;
@@ -21698,7 +21723,7 @@ index 98db2857..64f36a9e 100644
          fprintf(stderr, "[RSX metal] %s on %s (%ux%u), guest shaders %s, %s path\n",
                  s_headless ? "headless" : "windowed",
                  [[s_dev name] UTF8String], s_width, s_height,
-@@ -3837,6 +7127,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
+@@ -3837,6 +7137,7 @@ int rsx_metal_backend_init(u32 width, u32 height, const char* title)
  void rsx_metal_backend_shutdown(void)
  {
      @autoreleasepool {
@@ -21706,7 +21731,7 @@ index 98db2857..64f36a9e 100644
          if (s_ready) rsx_set_backend(NULL);
          if (s_eng_active) rsx_draw_engine_shutdown();
          rsx_draw_engine_set_backend(NULL);
-@@ -3853,6 +7144,12 @@ void rsx_metal_backend_shutdown(void)
+@@ -3853,6 +7154,12 @@ void rsx_metal_backend_shutdown(void)
              s_inflight = nil;
          }
  #if !TARGET_OS_IPHONE
@@ -21719,7 +21744,7 @@ index 98db2857..64f36a9e 100644
          if (s_window) { [s_window close]; s_window = nil; }
  #endif
          free(s_verts); s_verts = NULL;
-@@ -3886,25 +7183,180 @@ static int pump_messages_impl(void)
+@@ -3886,25 +7193,180 @@ static int pump_messages_impl(void)
                                                  inMode:NSDefaultRunLoopMode
                                                 dequeue:YES];
              if (!ev) break;
@@ -21904,7 +21929,7 @@ index 98db2857..64f36a9e 100644
      }
  #endif
      return s_closed ? -1 : 0;
-@@ -4010,8 +7462,9 @@ void rsx_metal_backend_present(void)
+@@ -4010,8 +7472,9 @@ void rsx_metal_backend_present(void)
              encode_draw(enc, &rec->u.draw, &ps);
          }
          if (enc) [enc endEncoding];
@@ -21915,7 +21940,7 @@ index 98db2857..64f36a9e 100644
  
          if (s_headless) {
              /* The readback below must see a completed frame. */
-@@ -4019,8 +7472,8 @@ void rsx_metal_backend_present(void)
+@@ -4019,8 +7482,8 @@ void rsx_metal_backend_present(void)
              [cb waitUntilCompleted];
          } else {
              dispatch_semaphore_t sem = s_inflight;
@@ -21926,7 +21951,7 @@ index 98db2857..64f36a9e 100644
                  dispatch_semaphore_signal(sem);
              }];
              [cb commit];        /* no wait: the CPU goes on to the next frame */
-@@ -4068,3 +7521,121 @@ u32 rsx_metal_backend_guest_draws(void)
+@@ -4068,3 +7531,121 @@ u32 rsx_metal_backend_guest_draws(void)
  {
      return s_eng_active ? rsx_draw_engine_guest_draws() : s_last_guest_draws;
  }
@@ -21963,9 +21988,9 @@ index 98db2857..64f36a9e 100644
 +void  rsx_metal_gfx_set_contrast(float v)  { s_gfx_contrast = !(v > 0.0f) ? 1.0f : v < 0.5f ? 0.5f : v > 1.5f ? 1.5f : v; }
 +int   rsx_metal_gfx_fxaa(void)             { return s_gfx_fxaa; }
 +void  rsx_metal_gfx_set_fxaa(int on)       { s_gfx_fxaa = on != 0; if (on) s_gfx_smaa = 0; }
-+/* 0 off, 1 FXAA, 2 SMAA. */
-+int   rsx_metal_gfx_aa(void)               { return s_gfx_fxaa ? 1 : s_gfx_smaa ? 2 : 0; }
-+void  rsx_metal_gfx_set_aa(int mode)       { s_gfx_fxaa = mode == 1; s_gfx_smaa = mode == 2; }
++/* 0 off, 1 FXAA, 2 SMAA, 3 SMAA + post-scale FXAA. */
++int   rsx_metal_gfx_aa(void)               { return s_gfx_fxaa && s_gfx_smaa ? 3 : s_gfx_fxaa ? 1 : s_gfx_smaa ? 2 : 0; }
++void  rsx_metal_gfx_set_aa(int mode)       { s_gfx_fxaa = mode == 1 || mode == 3; s_gfx_smaa = mode == 2 || mode == 3; }
 +int   rsx_metal_gfx_aniso(void)            { return s_gfx_aniso; }
 +/* PS3_RES_SCALE in effect (fixed for the session); -1 on the vtable path. */
 +float rsx_metal_res_scale(void)            { return s_eng_active ? s_res_scale : -1.0f; }
@@ -22748,6 +22773,56 @@ index 00000000..9b069a10
 +  MTLRenderPassDescriptor*rp=[MTLRenderPassDescriptor renderPassDescriptor];rp.colorAttachments[0].texture=out;rp.colorAttachments[0].loadAction=MTLLoadActionClear;rp.colorAttachments[0].storeAction=MTLStoreActionStore;id<MTLCommandBuffer>cb=[s_queue commandBuffer];id<MTLRenderCommandEncoder>e=[cb renderCommandEncoderWithDescriptor:rp];[e setRenderPipelineState:p];[e setVertexBytes:values[vi] length:16 atIndex:0];[e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[e endEncoding];[cb commit];[cb waitUntilCompleted];CHECK(cb.status==MTLCommandBufferStatusCompleted&&!cb.error,"GPU completes");float pixel[4];[out getBytes:pixel bytesPerRow:16 fromRegion:MTLRegionMake2D(0,0,1,1) mipmapLevel:0];int good=1;for(int lane=0;lane<4;lane++){float base=values[vi][swizzle?3-lane:lane];if(ai<2)base=fminf(1,fmaxf(0,base));float want=base;if(modifier==2)want=fabsf(want);if(modifier)want=-want;if(opindex)want=want*base;if(opindex==2)want+=base;good &=fabsf(pixel[lane]-want)<1e-6;}CHECK(good,"COL0/COL1 clamp precedes modifiers; TC remains unrestricted");if(!good)fprintf(stderr,"DETAIL attr%u modifier%d input%d output%g,%g,%g,%g\n",attrs[ai],modifier,vi,pixel[0],pixel[1],pixel[2],pixel[3]);
 + }
 + printf("Color input boundary: %d checks, %d failures\n",checks,failures);free(vm_base);return failures?1:0;}}
+diff --git a/libs/video/tests/test_cull_both.c b/libs/video/tests/test_cull_both.c
+new file mode 100644
+index 00000000..90bf9fe4
+--- /dev/null
++++ b/libs/video/tests/test_cull_both.c
+@@ -0,0 +1,44 @@
++/* Exercise production method dispatch with a recording backend. */
++#define main unused_engine_suite_main
++#include "test_rsx_draw_engine.c"
++#undef main
++
++unsigned long long ps3_ms_now(void) { return 0; }
++
++int main(void)
++{
++    vm_base = calloc(1, GUEST_BYTES);
++    if (!vm_base) return 2;
++    ppu_vm_size = GUEST_BYTES;
++    engine_up();
++    m(0x183C, 1);       /* CULL_FACE_ENABLE */
++    m(0x1830, 0x0408);  /* FRONT_AND_BACK */
++    const u32 polygons[] = { RSX_PRIMITIVE_TRIANGLES,
++        RSX_PRIMITIVE_TRIANGLE_STRIP, RSX_PRIMITIVE_TRIANGLE_FAN,
++        RSX_PRIMITIVE_QUADS };
++    for (u32 i = 0; i < sizeof polygons / sizeof polygons[0]; i++) {
++        m(M_BEGIN_END, polygons[i]);
++        m(M_DRAW_ARRAYS, 3u << 24);
++        m(M_BEGIN_END, 0);
++    }
++    CHECK(stub.n_draw == 0, "cull-both suppresses every polygon topology");
++    CHECK(stub.n_pipeline_create == 0, "culled polygons need no GPU pipeline");
++    m(M_BEGIN_END, RSX_PRIMITIVE_LINES);
++    m(M_DRAW_ARRAYS, 1u << 24);
++    m(M_BEGIN_END, 0);
++    CHECK(stub.n_draw == 1, "face culling preserves lines");
++    m(M_BEGIN_END, RSX_PRIMITIVE_POINTS);
++    m(M_DRAW_ARRAYS, 0);
++    m(M_BEGIN_END, 0);
++    CHECK(stub.n_draw == 2, "face culling preserves points");
++    m(0x183C, 0);
++    draw_triangle();
++    CHECK(stub.n_draw == 3, "disabling face culling restores triangles");
++    m(0x183C, 1);
++    m(0x1830, 0x0405);  /* BACK */
++    draw_triangle();
++    CHECK(stub.n_draw == 4, "ordinary back-face culling still submits triangles");
++    engine_down();
++    free(vm_base);
++    return g_failures ? 1 : 0;
++}
 diff --git a/libs/video/tests/test_fp_decompiler.c b/libs/video/tests/test_fp_decompiler.c
 index b75424fe..54f0c7bf 100644
 --- a/libs/video/tests/test_fp_decompiler.c
@@ -23443,6 +23518,101 @@ index 00000000..c02bc369
 +  }
 +  puts("Metal frame-rate scenario passed");
 + }
++}
+diff --git a/libs/video/tests/test_metal_hybrid_aa.m b/libs/video/tests/test_metal_hybrid_aa.m
+new file mode 100644
+index 00000000..146d8183
+--- /dev/null
++++ b/libs/video/tests/test_metal_hybrid_aa.m
+@@ -0,0 +1,89 @@
++/* Real GPU coverage for the AA passes; optional PPM input for visual QA. */
++#include "../rsx_metal_backend.m"
++#include <assert.h>
++volatile uint32_t g_pad_mouse_buttons;
++
++static id<MTLTexture> image_texture(unsigned w, unsigned h, const unsigned char* px)
++{
++    MTLTextureDescriptor* td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:w height:h mipmapped:NO];
++    td.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
++    td.storageMode = MTLStorageModeShared;
++    id<MTLTexture> t = [s_dev newTextureWithDescriptor:td];
++    assert(t);
++    [t replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0 withBytes:px bytesPerRow:w * 4];
++    return t;
++}
++
++static unsigned char* filtered(id<MTLTexture> src, int mode)
++{
++    rsx_metal_gfx_set_aa(mode);
++    assert(rsx_metal_gfx_aa() == mode);
++    id<MTLCommandBuffer> cb = [s_queue commandBuffer];
++    id<MTLTexture> out = gfx_smaa(cb, src);
++    assert(out);
++    if (mode == 3) { out = gfx_fxaa(cb, out); assert(out); }
++    unsigned w = (unsigned)src.width, h = (unsigned)src.height;
++    unsigned char* empty = calloc(w * h, 4);
++    id<MTLTexture> back = image_texture(w, h, empty);
++    free(empty);
++    id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
++    [b copyFromTexture:out toTexture:back];
++    [b endEncoding];
++    [cb commit]; [cb waitUntilCompleted];
++    assert(cb.status == MTLCommandBufferStatusCompleted && !cb.error);
++    unsigned char* pixels = malloc(w * h * 4);
++    [back getBytes:pixels bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
++    return pixels;
++}
++
++int main(int argc, char** argv)
++{
++    @autoreleasepool {
++        s_dev = MTLCreateSystemDefaultDevice();
++        if (!s_dev) { fprintf(stderr, "Metal device required\n"); return 2; }
++        s_queue = [s_dev newCommandQueue];
++        NSError* error = nil;
++        s_eng_helper_lib = [s_dev newLibraryWithSource:kEngHelperMSL options:nil error:&error];
++        if (!s_eng_helper_lib) { fprintf(stderr, "%s\n", error.description.UTF8String); return 1; }
++        MTLSamplerDescriptor* sd = [MTLSamplerDescriptor new];
++        sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
++        s_eng_point_sampler = [s_dev newSamplerStateWithDescriptor:sd];
++        sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear;
++        s_eng_linear_sampler = [s_dev newSamplerStateWithDescriptor:sd];
++        unsigned w = 128, h = 128;
++        unsigned char* px = malloc(w * h * 4);
++        for (unsigned y = 0; y < h; y++) for (unsigned x = 0; x < w; x++) {
++            unsigned v = x > y / 3 + 32 ? 180 : 40;
++            if (y > 96) v = 96; /* flat region must remain stable */
++            unsigned i = (y * w + x) * 4;
++            px[i] = px[i + 1] = px[i + 2] = v; px[i + 3] = 255;
++        }
++        id<MTLTexture> src = image_texture(w, h, px);
++        unsigned char* smaa = filtered(src, 2);
++        unsigned char* hybrid = filtered(src, 3);
++        unsigned changed = 0, partial = 0;
++        for (unsigned y = 4; y < h - 4; y++) for (unsigned x = 4; x < w - 4; x++) {
++            unsigned i = (y * w + x) * 4;
++            changed += hybrid[i] != smaa[i];
++            partial += hybrid[i] > 40 && hybrid[i] < 180 && y < 90;
++            assert(hybrid[i + 3] == 255);
++            if (y > 104) assert(abs((int)hybrid[i] - 96) <= 1);
++        }
++        assert(changed > 0 && partial > 0);
++        printf("Hybrid AA: %u extra filtered pixels; %u partial-coverage pixels; flat color and alpha preserved\n", changed, partial);
++        free(px); free(smaa); free(hybrid);
++        if (argc == 3) {
++            FILE* f = fopen(argv[1], "rb"); assert(f);
++            assert(fscanf(f, "P6 %u %u 255", &w, &h) == 2); fgetc(f);
++            px = malloc(w * h * 4);
++            for (unsigned i = 0; i < w * h; i++) { assert(fread(px + i * 4, 1, 3, f) == 3); px[i * 4 + 3] = 255; }
++            fclose(f);
++            src = image_texture(w, h, px); free(px);
++            hybrid = filtered(src, 3);
++            f = fopen(argv[2], "wb"); assert(f); fprintf(f, "P6\n%u %u\n255\n", w, h);
++            for (unsigned i = 0; i < w * h; i++) fwrite(hybrid + i * 4, 1, 3, f);
++            fclose(f); free(hybrid);
++        }
++    }
++    return 0;
 +}
 diff --git a/libs/video/tests/test_metal_independent_clears.m b/libs/video/tests/test_metal_independent_clears.m
 new file mode 100644
