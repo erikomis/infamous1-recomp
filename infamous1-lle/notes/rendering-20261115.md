@@ -48,6 +48,28 @@ zeta `0x0F340000`, comparação e PCF ativos nos programas
 `395b63487dde8cc0`, `6be19b39da03d1b9` e `37ba2ce71fec0dda`.
 A sombra fragmentada da imagem do usuário ainda não tem correção comprovada.
 
+**Resolvido depois (mesmo dia):** não é erro de tradução. Cenário: o save
+copiado, o roteiro de controle do probe, o Cole andando e a câmera de cima
+no terraço (`out/shadow-ab1..3`, `out/shadow-soft-*`). As etapas da sombra
+foram alternadas ao vivo na mesma cena (`PS3_TOGGLE_FILE`):
+`ZTEX_CROP=0` e `SHADOW_CMP=0` estragam todas as sombras (então o recorte
+e a ordem atuais estão certos); `DEPTH_BOUNDS`, `SHADE_BACKFACE`,
+`POLY_OFFSET`, `DEPTH_CLAMP` e `SHADOW_D24` não mudam a sombra do Cole.
+Em 1× e 3× a mesma cena mostra o mapa ganhando resolução com a escala (a
+sombra do arame farpado só aparece nítida em 3×). Os degraus são o próprio
+mapa de 1024×1024 do jogo, filtrado em 2×2 texels como no RSX: com o sol
+baixo cada texel fica esticado no chão.
+
+Correção: `PS3_SHADOW_FILTER` (auto) compara 4×4 texels com pesos
+(1-f, 1, 1, f)/3 por eixo quando a resolução interna passa de 720p; em 1×
+o shader é o mesmo de antes, byte a byte. `libs/video/tests/test_shadow_soft.c`:
+3220 verificações (descritor, texto do shader, rampa de 3 texels sem saltos).
+No jogo os três FPs acima saem com `soft 1`, sem erro de shader.
+Antes/depois em 1.5× com o mesmo binário (`PS3_SHADOW_FILTER=0` reproduz o
+antigo): a sombra do Cole no chão aberto perde os degraus, e no barril as
+bordas ficam suaves; o "depois" rodou a ~34–35 fps headless. Efeito
+colateral: sombras muito finas (arame farpado) ficam mais fracas.
+
 Corrigido um defeito independente: `FRONT_AND_BACK` era traduzido como
 `FRONT`, deixando as faces traseiras serem desenhadas. O engine agora não
 submete polígonos nesse estado; linhas e pontos continuam sendo desenhados.

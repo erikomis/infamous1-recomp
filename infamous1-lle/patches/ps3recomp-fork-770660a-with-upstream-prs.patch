@@ -11638,7 +11638,7 @@ index 176efc44..e1ef017f 100644
  
  /* ---- lifecycle -------------------------------------------------------- */
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 9a76e67b..ce72a403 100644
+index 9a76e67b..d32e5018 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,8 @@
@@ -13525,9 +13525,9 @@ index 9a76e67b..ce72a403 100644
 +        if (on < 0) { const char* e = getenv("PS3RECOMP_ENG_POLY_OFFSET_LOG"); on = e && *e == '1'; }
 +        if (on && n++ < 256)
 +            for (u32 u = 0; u < RSX_DSP_NUM_TEXTURES; u++) if (shadow_mask & (1u << u))
-+                fprintf(stderr, "[rsx engine] shadow fp=%016llx p=%u unit %u func %u linear %u grid %u mode %u %ux%u\n",
++                fprintf(stderr, "[rsx engine] shadow fp=%016llx p=%u unit %u func %u linear %u grid %u mode %u soft %u %ux%u\n",
 +                        (unsigned long long)in_fp, handle, u, shadow[u].func, shadow[u].linear,
-+                        shadow[u].grid, shadow[u].mode,
++                        shadow[u].grid, shadow[u].mode, shadow[u].soft,
 +                        tex[u].width, tex[u].height); }
      { static u32 logs = 0; if (__atomic_fetch_add(&logs, 1, __ATOMIC_RELAXED) < 32)
          fprintf(stderr, "[rsx engine] pipeline %016llx: %s vp %d, fp %d,"
@@ -15704,7 +15704,7 @@ index e54d615b..91eec187 100644
   * itself rather than through the FIFO's 0xE944. */
  void rsx_draw_engine_present(void);
 diff --git a/libs/video/rsx_fp_decompiler.c b/libs/video/rsx_fp_decompiler.c
-index 933abcb2..9dcdf03d 100644
+index 933abcb2..1713681b 100644
 --- a/libs/video/rsx_fp_decompiler.c
 +++ b/libs/video/rsx_fp_decompiler.c
 @@ -10,6 +10,7 @@
@@ -15872,7 +15872,7 @@ index 933abcb2..9dcdf03d 100644
      if (s->negate) snprintf(buf, bufsz, "-(%s%s%s)", pre, swz, post);
      else           snprintf(buf, bufsz, "%s%s%s", pre, swz, post);
  }
-@@ -445,12 +528,299 @@ int rsx_fp_decompile(const u8* ucode, u32 max_bytes, u32 ctrl, char* out, u32 ou
+@@ -445,12 +528,346 @@ int rsx_fp_decompile(const u8* ucode, u32 max_bytes, u32 ctrl, char* out, u32 ou
      return rsx_fp_decompile_ex(ucode, max_bytes, ctrl, 0u, out, out_size);
  }
  
@@ -15920,6 +15920,34 @@ index 933abcb2..9dcdf03d 100644
 +    return v;
 +}
 +
++/* PS3_SHADOW_FILTER=auto|1|0 (default auto): the RSX filters a linear
++ * comparison lookup over 2x2 texels, so a shadow edge steps once per texel
++ * of the map. inFAMOUS draws its sun shadows into 1024x1024; under a low sun
++ * each texel lies stretched along the ground and Cole's shadow on the
++ * tutorial terrace prints as rectangles and thin horizontal dashes (at 720p
++ * as on the PS3). PS3_RES_SCALE enlarges the map with the image (1536 at
++ * 1.5x, 3072 at 3x), which shrinks the steps but leaves them hard-edged at
++ * the new size, where a sharper picture shows them. 1: compare over the 4x4
++ * texels round the lookup, weighted (1-f, 1, 1, f) / 3 per axis -- the 2x2
++ * filter's own tent averaged over three texel offsets -- so an edge ramps
++ * over three texels and its steps blend into a slope. 0: the RSX's 2x2.
++ * auto: 1 when the internal resolution is above the guest's (where the
++ * picture is meant to look better than the PS3's), 0 at 1x (the PS3's
++ * look). Part of the shadow descriptor, so the programs that compare are
++ * the only ones it rebuilds. */
++static int s_fp_shadow_soft = -2;   /* -2 not read yet, -1 auto */
++void rsx_fp_set_shadow_soft(int mode) { __atomic_store_n(&s_fp_shadow_soft, mode < 0 ? -1 : mode != 0, __ATOMIC_RELAXED); }
++static int fp_shadow_soft(void)
++{
++    int v = __atomic_load_n(&s_fp_shadow_soft, __ATOMIC_RELAXED);
++    if (v == -2) {
++        const char* e = getenv("PS3_SHADOW_FILTER");
++        v = (!e || !*e || !strcmp(e, "auto")) ? -1 : (*e == '1' || !strcmp(e, "soft")) ? 1 : 0;
++        __atomic_store_n(&s_fp_shadow_soft, v, __ATOMIC_RELAXED);
++    }
++    return v < 0 ? (s_fp_wpos_sx > 1.0f || s_fp_wpos_sy > 1.0f) : v;
++}
++
 +void rsx_fp_shadow_desc_from_texture(rsx_fp_shadow_desc* out, u32 format,
 +    u32 dimension, u32 cube, u32 mips, u32 filter, u32 address, u32 control0)
 +{
@@ -15943,6 +15971,7 @@ index 933abcb2..9dcdf03d 100644
 +        if (d24 != 2) out->grid = base == 0x92 ? 2 : 1;
 +        if (d24 == 3 && (out->func == 1 || out->func == 4)) out->func = (u8)(out->func + 2);
 +    }
++    out->soft = (u8)(out->enabled == 1 && out->linear && out->mode != 2 && fp_shadow_soft());
 +}
 +
 +u32 rsx_fp_texture_units(const u8* ucode, u32 max_bytes)
@@ -16017,6 +16046,24 @@ index 933abcb2..9dcdf03d 100644
 +    }
 +    out_puts(p, "    float2 position = uv * size - 0.5;\n"
 +        "    float2 base = floor(position); float2 fraction = position - base;\n");
++    if (d->soft) {
++        /* PS3_SHADOW_FILTER: texels base-1 .. base+2 on each axis, weights
++         * (1-f, 1, 1, f) / 3 (they sum to 1 for any f). */
++        out_puts(p, "    float4 wx = float4(1.0 - fraction.x, 1.0, 1.0, fraction.x) / 3.0;\n"
++            "    float4 wy = float4(1.0 - fraction.y, 1.0, 1.0, fraction.y) / 3.0;\n"
++            "    float lit = 0.0;\n");
++        static const char* const axis[4] = { "x", "y", "z", "w" };
++        static const char* const off[4] = { "-0.5", "0.5", "1.5", "2.5" };
++        for (u32 j = 0; j < 4; j++)
++            for (u32 i = 0; i < 4; i++) {
++                snprintf(text, sizeof text,
++                    "    lit += wx.%s * wy.%s * _rsx_shadow_cmp%u(reference, %s%s.SampleLevel(rsx_samp[%u], (base + float2(%s, %s)) / size, 0.0).r%s);\n",
++                    axis[i], axis[j], unit, tq0, tex, unit, off[i], off[j], tq1);
++                out_puts(p, text);
++            }
++        out_puts(p, "    return (float4)lit;\n}\n");
++        return;
++    }
 +    for (u32 tap = 0; tap < 4; tap++) {
 +        snprintf(text, sizeof text,
 +            "    float d%u = %s%s.SampleLevel(rsx_samp[%u], (base + float2(%s, %s)) / size, 0.0).r%s;\n",
@@ -16175,7 +16222,7 @@ index 933abcb2..9dcdf03d 100644
      u32 buffered_constant_count = 0;
      if (buffered) {
          rsx_fp_constant_block constants;
-@@ -479,6 +849,30 @@ static int rsx_fp_decompile_internal(
+@@ -479,6 +896,30 @@ static int rsx_fp_decompile_internal(
          /* Condition-code registers for exec_if predication / set_cond. Reset
           * to 0 (NV40 CC power-up state). Dead in non-predicated programs. */
          "    float4 cc0 = (float4)0; float4 cc1 = (float4)0;\n");
@@ -16206,7 +16253,7 @@ index 933abcb2..9dcdf03d 100644
  
      /* Which colour export each register file received a write to, indexed
       * [half][target]. The whole file is tracked, not just target 0, because
-@@ -517,6 +911,14 @@ static int rsx_fp_decompile_internal(
+@@ -517,6 +958,14 @@ static int rsx_fp_decompile_internal(
          u32 opcode    = (w0 & FP_OPCODE_MASK) >> FP_OPCODE_SHIFT;
          u32 input_src = (w0 & FP_INPUT_SRC_MASK) >> FP_INPUT_SRC_SHIFT;
          u32 tex_unit  = (w0 & FP_TEX_UNIT_MASK) >> FP_TEX_UNIT_SHIFT;
@@ -16221,7 +16268,7 @@ index 933abcb2..9dcdf03d 100644
          int is_branch = (w2 & FP_BRANCH) ? 1 : 0;
  
          /* Execution condition (exec_if) + condition-code write (set_cond).
-@@ -551,6 +953,16 @@ static int rsx_fp_decompile_internal(
+@@ -551,6 +1000,16 @@ static int rsx_fp_decompile_internal(
          decode_src(w1, w1 & FP_SRC0_ABS, &s0);
          decode_src(w2, w2 & FP_SRC1_ABS, &s1);
          decode_src(w3, 0,                &s2);
@@ -16238,7 +16285,7 @@ index 933abcb2..9dcdf03d 100644
  
          /* Inline constant: any CONST source pulls the next 16 bytes as a
           * float4 literal and advances past it. */
-@@ -569,15 +981,19 @@ static int rsx_fp_decompile_internal(
+@@ -569,15 +1028,19 @@ static int rsx_fp_decompile_internal(
              has_k = 1;
          }
  
@@ -16261,7 +16308,7 @@ index 933abcb2..9dcdf03d 100644
              c, sizeof(c));
          if (has_k)
              constant_slot++;
-@@ -639,6 +1055,14 @@ static int rsx_fp_decompile_internal(
+@@ -639,6 +1102,14 @@ static int rsx_fp_decompile_internal(
              continue;
          }
  
@@ -16276,7 +16323,7 @@ index 933abcb2..9dcdf03d 100644
          /* Build the RHS expression for this opcode. */
          char rhs[640];
          int handled = 1;
-@@ -655,6 +1079,18 @@ static int rsx_fp_decompile_internal(
+@@ -655,6 +1126,18 @@ static int rsx_fp_decompile_internal(
          case OP_FRC: snprintf(rhs, sizeof(rhs), "frac(%s)", a); break;
          case OP_FLR: snprintf(rhs, sizeof(rhs), "floor(%s)", a); break;
          case OP_RCP: snprintf(rhs, sizeof(rhs), "(1.0 / (%s).x)", a); break;
@@ -16295,7 +16342,7 @@ index 933abcb2..9dcdf03d 100644
          /* Real RSX RSQ ignores the input's sign — 1/sqrt(|x|), not 1/sqrt(x)
           * (oracle: RPCS3 FragmentProgramDecompiler.cpp, "RSQ ignores the sign
           * of the inputs (Metro Last Light, GTA4)"). The strict form NaN'd the
-@@ -702,27 +1138,46 @@ static int rsx_fp_decompile_internal(
+@@ -702,27 +1185,46 @@ static int rsx_fp_decompile_internal(
          case OP_SNE: snprintf(rhs, sizeof(rhs), "(float4)((%s) != (%s))", a, b); break;
          case OP_SEQ: snprintf(rhs, sizeof(rhs), "(float4)((%s) == (%s))", a, b); break;
          case OP_TEX:
@@ -16346,7 +16393,7 @@ index 933abcb2..9dcdf03d 100644
              else
                  snprintf(rhs, sizeof(rhs),
                           "rsx_tex[%u].Sample(rsx_samp[%u], (%s).xy / (%s).w)",
-@@ -732,9 +1187,9 @@ static int rsx_fp_decompile_internal(
+@@ -732,9 +1234,9 @@ static int rsx_fp_decompile_internal(
              /* Biased / explicit-LOD sample; bias or LOD is src1.x (RPCS3
               * TEXTURE_SAMPLE2D_BIAS / _LOD). GH3's fret buttons and fret lines
               * are TXB: unhandled, they sampled nothing and output alpha 0. */
@@ -16358,7 +16405,7 @@ index 933abcb2..9dcdf03d 100644
              snprintf(rhs, sizeof(rhs), "%s.%s(rsx_samp[%u], (%s).%s, (%s).x)", tn,
                       opcode == OP_TXB ? "SampleBias" : "SampleLevel", tex_unit, a,
                       cube ? "xyz" : "xy", b);
-@@ -760,15 +1215,76 @@ static int rsx_fp_decompile_internal(
+@@ -760,15 +1262,76 @@ static int rsx_fp_decompile_internal(
              }
              handled = 0;   /* no destination write */
              break;
@@ -16439,7 +16486,7 @@ index 933abcb2..9dcdf03d 100644
          if (handled && (has_dest || set_cond)) {
              u32 dst_idx = (w0 & FP_OUT_REG_MASK) >> FP_OUT_REG_SHIFT;
              int dst_half = (w0 & FP_OUT_HALF) ? 1 : 0;
-@@ -817,13 +1333,17 @@ static int rsx_fp_decompile_internal(
+@@ -817,13 +1380,17 @@ static int rsx_fp_decompile_internal(
                                   "      /* exec_if=none: write suppressed */\n");
                      } else {
                          /* Per-component select gated by the CC sign test.
@@ -16461,7 +16508,7 @@ index 933abcb2..9dcdf03d 100644
                      }
                      out_puts(&o, buf);
                  }
-@@ -881,6 +1401,28 @@ static int rsx_fp_decompile_internal(
+@@ -881,6 +1448,28 @@ static int rsx_fp_decompile_internal(
      for (u32 t = FP_MAX_COLOR_TARGETS; t-- > 1; )
          if (wrote[half_exports][t]) { targets = t + 1; break; }
  
@@ -16490,7 +16537,7 @@ index 933abcb2..9dcdf03d 100644
      if (targets == 1) {
          char tail[96];
          snprintf(tail, sizeof(tail),
-@@ -907,7 +1449,7 @@ static int rsx_fp_decompile_internal(
+@@ -907,7 +1496,7 @@ static int rsx_fp_decompile_internal(
      /* Preamble: PSInput matches the backend's placeholder layout; temp/half
       * register files; texture+sampler banks for TEX. Built here, in front of
       * the body, now that the return type is known. */
@@ -16499,7 +16546,7 @@ index 933abcb2..9dcdf03d 100644
      Out p = { preamble, sizeof(preamble), 0, 1 };
      preamble[0] = '\0';
      out_puts(&p,
-@@ -915,19 +1457,39 @@ static int rsx_fp_decompile_internal(
+@@ -915,19 +1504,39 @@ static int rsx_fp_decompile_internal(
          "    float4 position : SV_POSITION; float4 col0 : COLOR0; float4 col1 : COLOR1;\n"
          "    float4 fog : FOG;\n"
          "    float4 tc0:TEXCOORD0; float4 tc1:TEXCOORD1; float4 tc2:TEXCOORD2; float4 tc3:TEXCOORD3;\n"
@@ -16543,7 +16590,7 @@ index 933abcb2..9dcdf03d 100644
              out_puts(&p, decl);
          }
      }
-@@ -944,7 +1506,38 @@ static int rsx_fp_decompile_internal(
+@@ -944,7 +1553,38 @@ static int rsx_fp_decompile_internal(
              "};\n",
              buffered_constant_count ? buffered_constant_count : 1u);
          out_puts(&p, constants_decl);
@@ -16582,7 +16629,7 @@ index 933abcb2..9dcdf03d 100644
      if (targets == 1) {
          out_puts(&p, "float4 main(PSInput input) : SV_TARGET {\n");
      } else {
-@@ -970,7 +1563,7 @@ int rsx_fp_decompile_ex(const u8* ucode, u32 max_bytes, u32 ctrl,
+@@ -970,7 +1610,7 @@ int rsx_fp_decompile_ex(const u8* ucode, u32 max_bytes, u32 ctrl,
                          u32 tex_cube_mask, char* out, u32 out_size)
  {
      return rsx_fp_decompile_internal(
@@ -16591,7 +16638,7 @@ index 933abcb2..9dcdf03d 100644
  }
  
  int rsx_fp_decompile_buffered_ex(
-@@ -978,10 +1571,48 @@ int rsx_fp_decompile_buffered_ex(
+@@ -978,10 +1618,48 @@ int rsx_fp_decompile_buffered_ex(
      char* out, u32 out_size, u32* out_constant_count)
  {
      return rsx_fp_decompile_internal(
@@ -16641,7 +16688,7 @@ index 933abcb2..9dcdf03d 100644
  static float fp_half_to_float(u16 h)
  {
      const u32 sign = (u32)(h & 0x8000u) << 16;
-@@ -1173,7 +1804,7 @@ int rsx_fp_extract_consts(const u8* ucode, u32 max_bytes, float* out, int max_ou
+@@ -1173,7 +1851,7 @@ int rsx_fp_extract_consts(const u8* ucode, u32 max_bytes, float* out, int max_ou
      }
      { static int dbg = -1;
        if (dbg < 0) { const char* e = getenv("FP_KDBG"); dbg = e ? atoi(e) : 0; }
@@ -16650,7 +16697,7 @@ index 933abcb2..9dcdf03d 100644
          fprintf(stderr, "[FPK] %d consts%c", n, 10);
          for (int _q = 0; _q < n; _q++)
              fprintf(stderr, "   k[%2d] = (%g %g %g %g)%c", _q, out[_q*4+0],
-@@ -1236,6 +1867,106 @@ u32 rsx_fp_code_hash(const u8* ucode, u32 max_bytes)
+@@ -1236,6 +1914,106 @@ u32 rsx_fp_code_hash(const u8* ucode, u32 max_bytes)
   * Cube units are skipped: their coordinate is a float3 direction, and
   * RSX_TEX_FMT_UNNORM has no meaning for one.
   */
@@ -16757,7 +16804,7 @@ index 933abcb2..9dcdf03d 100644
  int rsx_fp_apply_unnorm_scale(char* hlsl, u32 hlsl_size, u32 unnorm_mask,
                                const u32 dim[][2], u32 cube_mask)
  {
-@@ -1294,3 +2025,183 @@ int rsx_fp_apply_unnorm_scale(char* hlsl, u32 hlsl_size, u32 unnorm_mask,
+@@ -1294,3 +2072,183 @@ int rsx_fp_apply_unnorm_scale(char* hlsl, u32 hlsl_size, u32 unnorm_mask,
      }
      return patched;
  }
@@ -16942,7 +16989,7 @@ index 933abcb2..9dcdf03d 100644
 +    return 1;
 +}
 diff --git a/libs/video/rsx_fp_decompiler.h b/libs/video/rsx_fp_decompiler.h
-index 7161c4e9..5c56fd24 100644
+index 7161c4e9..a539f45f 100644
 --- a/libs/video/rsx_fp_decompiler.h
 +++ b/libs/video/rsx_fp_decompiler.h
 @@ -78,12 +78,37 @@ int rsx_fp_apply_alpha_test(char* hlsl, u32 out_size, u32 func, float ref);
@@ -16983,7 +17030,7 @@ index 7161c4e9..5c56fd24 100644
  int rsx_fp_apply_unnorm_scale(char* hlsl, u32 hlsl_size, u32 unnorm_mask,
                                const u32 dim[][2], u32 cube_mask);
  
-@@ -116,6 +141,39 @@ int rsx_fp_decompile_buffered_ex(
+@@ -116,6 +141,45 @@ int rsx_fp_decompile_buffered_ex(
      const u8* ucode, u32 max_bytes, u32 ctrl, u32 tex_cube_mask,
      char* out, u32 out_size, u32* out_constant_count);
  
@@ -17004,6 +17051,9 @@ index 7161c4e9..5c56fd24 100644
 +     * fixed-point steps first (PS3RECOMP_ENG_SHADOW_D24). mode: that knob's
 +     * diagnostic variants (2 filter-then-compare, 3 ties pass, 4 bias). */
 +    u8 grid, mode;
++    /* soft: a linear (PCF) map filtered over 4x4 texels instead of the
++     * RSX's 2x2 (PS3_SHADOW_FILTER; see rsx_fp_decompiler.c). */
++    u8 soft;
 +} rsx_fp_shadow_desc;
 +void rsx_fp_shadow_desc_from_texture(rsx_fp_shadow_desc* out, u32 format,
 +    u32 dimension, u32 cube, u32 mips, u32 filter, u32 address, u32 control0);
@@ -17014,6 +17064,9 @@ index 7161c4e9..5c56fd24 100644
 +/* PS3RECOMP_ENG_SHADOW_D24 (live, diagnostic, default 0): the depth
 + * compare's precision and filter order; see rsx_fp_decompiler.c. */
 +void rsx_fp_set_shadow_d24(int mode);
++/* PS3_SHADOW_FILTER: 1 the soft 4x4 filter, 0 the RSX's 2x2; -1 (default)
++ * soft exactly when the internal resolution is above the guest's. */
++void rsx_fp_set_shadow_soft(int mode);
 +u32 rsx_fp_texture_units(const u8* ucode, u32 max_bytes);
 +int rsx_fp_decompile_buffered_shadow_ex(
 +    const u8* ucode, u32 max_bytes, u32 ctrl, u32 tex_cube_mask,
@@ -17023,7 +17076,7 @@ index 7161c4e9..5c56fd24 100644
  /* Extract the exact runtime inline-CONST payload. Returns the slot count on
   * success or -1 for an unterminated/truncated/oversized program. */
  int rsx_fp_collect_constants(
-@@ -150,6 +208,74 @@ int rsx_fp_constant_ring_plan(
+@@ -150,6 +214,74 @@ int rsx_fp_constant_ring_plan(
  int rsx_vertex_constant_ring_plan(
      u32 used, u32 capacity, u32 block_bytes, u32* out_offset);
  
@@ -24220,6 +24273,129 @@ index 00000000..6152dd0d
 + for(u32 u=0;u<16;u++){rsx_test_fp_instr(uc+u*16,RSX_TEST_FP_OPC(0x17)|RSX_TEST_FP_TEXU(u)|RSX_TEST_FP_MASK_XYZW|RSX_TEST_FP_INSRC_TC0|(u==15?RSX_TEST_FP_END:0),RSX_TEST_FP_SRC_INPUT|RSX_TEST_FP_SWZ_IDENT);rsx_fp_shadow_desc_from_texture(&d[u],0xB0,2,0,1,0x02020000,3u<<28,0x80000000);}
 + CHECK(rsx_fp_texture_units(uc,256)==65535,"all sixteen unit mask");CHECK(rsx_fp_decompile_buffered_shadow_ex(uc,256,64,0,d,now,sizeof now,&nc)>0&&strstr(now,"_rsx_shadow_cmp15"),"bounded output supports sixteen comparison helpers");
 + printf("shadow metadata: %d checks, %d failures\n",checks,failures);return failures?1:0;}
+diff --git a/libs/video/tests/test_shadow_soft.c b/libs/video/tests/test_shadow_soft.c
+new file mode 100644
+index 00000000..0238b31a
+--- /dev/null
++++ b/libs/video/tests/test_shadow_soft.c
+@@ -0,0 +1,117 @@
++/* PS3_SHADOW_FILTER: the soft 4x4 comparison filter.
++ *
++ * Descriptor: auto is the RSX's 2x2 at the guest's resolution and soft above
++ * it; 0 / 1 force either; a nearest-filtered map and the D24 diagnostic's
++ * filter-then-compare mode are never soft. Translation: a soft map's helper
++ * compares 16 texels with the tent weights, a 2x2 one keeps its four taps
++ * byte for byte. Weights: the helper's formula, evaluated here over a map
++ * that steps from shadow to lit, sums to 1, ramps across three texels
++ * instead of one and has no jump where the lookup crosses a texel. */
++#include "rsx_fp_decompiler.h"
++#include "rsx_test_programs.h"
++#include <math.h>
++#include <stdio.h>
++#include <string.h>
++static int checks, failures;
++#define CHECK(x, n) do { checks++; if (!(x)) { failures++; fprintf(stderr, "FAIL %s\n", n); } } while (0)
++
++static int count(const char* s, const char* needle)
++{
++    int n = 0;
++    for (const char* p = strstr(s, needle); p; p = strstr(p + 1, needle)) n++;
++    return n;
++}
++
++/* Lit fraction of a lookup at texel coordinate x (one axis) over a map that is
++ * 0 (in shadow of a reference 0.5 under "reference < depth") left of texel
++ * 8 and 1 from it on: the 2x2 filter's and the soft one's weights. */
++static float lit_at(float x, int soft)
++{
++    const float pos = x - 0.5f, base = floorf(pos), f = pos - base;
++    float lit = 0.0f;
++    if (!soft) {
++        const float c0 = (base >= 8.0f), c1 = (base + 1.0f >= 8.0f);
++        return c0 * (1.0f - f) + c1 * f;
++    }
++    const float w[4] = { (1.0f - f) / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f, f / 3.0f };
++    for (int i = 0; i < 4; i++) lit += w[i] * (base - 1.0f + (float)i >= 8.0f);
++    return lit;
++}
++
++int main(void)
++{
++    u8 uc[64] = { 0 };
++    char hard[65536], soft[65536];
++    rsx_fp_shadow_desc d[16] = { { 0 } };
++    u32 nc = 0;
++    /* TEX unit 0 (0x17) from TC0, the shape of the title's lookups. */
++    rsx_test_fp_instr(uc, RSX_TEST_FP_OPC(0x17) | RSX_TEST_FP_TEXU(0) | RSX_TEST_FP_MASK_XYZW |
++                      RSX_TEST_FP_INSRC_TC0 | RSX_TEST_FP_END,
++                      RSX_TEST_FP_SRC_INPUT | RSX_TEST_FP_SWZ_IDENT);
++    const u32 linear = 0x02020000, nearest = 0x01010000, func = 3u << 28;
++
++    /* auto at the guest's resolution: the RSX's 2x2. */
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(d[0].enabled == 1 && d[0].linear && !d[0].soft, "auto at 1x keeps the 2x2 filter");
++    CHECK(rsx_fp_decompile_buffered_shadow_ex(uc, 16, 64, 0, d, hard, sizeof hard, &nc) > 0, "2x2 translation");
++    CHECK(strstr(hard, "lerp(lerp(c0, c1, fraction.x), lerp(c2, c3, fraction.x), fraction.y)") &&
++          !strstr(hard, "lit +="), "2x2 helper unchanged");
++
++    /* auto above it: soft. */
++    rsx_fp_set_wpos_scale(1.5f);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(d[0].soft == 1, "auto at 1.5x is soft");
++    CHECK(rsx_fp_decompile_buffered_shadow_ex(uc, 16, 64, 0, d, soft, sizeof soft, &nc) > 0, "soft translation");
++    CHECK(count(soft, "lit += wx.") == 16 && count(soft, "_rsx_shadow_cmp0(reference, ") == 16,
++          "soft helper compares sixteen texels");
++    CHECK(strstr(soft, "float2(-0.5, -0.5)") && strstr(soft, "float2(2.5, 2.5)") &&
++          strstr(soft, "return (float4)lit;"), "soft helper spans base-1 .. base+2");
++    rsx_fp_set_wpos_scale_xy(1.33f, 1.0f);   /* PS3_ASPECT widens x alone */
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(d[0].soft == 1, "auto with a wider x is soft");
++
++    /* Never soft: a nearest map (one tap on the RSX), the filter-then-compare
++     * diagnostic, an unsupported layout. */
++    rsx_fp_set_wpos_scale(3.0f);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, nearest, func, 0x80000000);
++    CHECK(!d[0].soft, "nearest map stays one tap");
++    rsx_fp_set_shadow_d24(2);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(d[0].mode == 2 && !d[0].soft, "filter-then-compare diagnostic is not soft");
++    rsx_fp_set_shadow_d24(0);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 2, linear, func, 0x80000000);
++    CHECK(d[0].enabled == 2 && !d[0].soft, "unsupported layout is not soft");
++
++    /* Forced either way. */
++    rsx_fp_set_shadow_soft(0);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(!d[0].soft, "0 keeps the 2x2 filter at 3x");
++    rsx_fp_set_wpos_scale(1.0f);
++    rsx_fp_set_shadow_soft(1);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(d[0].soft == 1, "1 is soft at 1x");
++    rsx_fp_set_shadow_soft(-1);
++    rsx_fp_shadow_desc_from_texture(d, 0xB0, 2, 0, 1, linear, func, 0x80000000);
++    CHECK(!d[0].soft, "auto again at 1x");
++
++    /* The weights over a shadow-to-lit step at texel 8. */
++    float prev = -1.0f, maxjump = 0.0f, lo_soft = 99, hi_soft = -99, lo_hard = 99, hi_hard = -99;
++    for (int i = 0; i <= 1600; i++) {
++        const float x = 4.0f + (float)i * 0.005f;   /* 4 .. 12 texels */
++        const float s = lit_at(x, 1), h = lit_at(x, 0);
++        CHECK(s >= -1e-6f && s <= 1.0f + 1e-6f, "soft result in [0, 1]");
++        if (prev >= 0.0f && fabsf(s - prev) > maxjump) maxjump = fabsf(s - prev);
++        CHECK(prev < 0.0f || s >= prev - 1e-6f, "soft ramp is monotonic");
++        prev = s;
++        if (s > 0.001f && s < 0.999f) { if (x < lo_soft) lo_soft = x; if (x > hi_soft) hi_soft = x; }
++        if (h > 0.001f && h < 0.999f) { if (x < lo_hard) lo_hard = x; if (x > hi_hard) hi_hard = x; }
++    }
++    CHECK(maxjump < 0.01f, "no jump where the lookup crosses a texel");
++    CHECK(fabsf((hi_hard - lo_hard) - 1.0f) < 0.02f, "2x2 edge ramps over one texel");
++    CHECK(fabsf((hi_soft - lo_soft) - 3.0f) < 0.02f, "soft edge ramps over three texels");
++    CHECK(fabsf(lit_at(8.0f, 1) - 0.5f) < 1e-6f && fabsf(lit_at(8.0f, 0) - 0.5f) < 1e-6f,
++          "both filters put the edge's middle on the same spot");
++    printf("shadow soft filter: %d checks, %d failures (2x2 ramp %.2f texels, soft %.2f)\n",
++           checks, failures, hi_hard - lo_hard, hi_soft - lo_soft);
++    return failures ? 1 : 0;
++}
 diff --git a/libs/video/tests/test_texture_layout.c b/libs/video/tests/test_texture_layout.c
 index 5a825a0f..1a9ebb9a 100644
 --- a/libs/video/tests/test_texture_layout.c

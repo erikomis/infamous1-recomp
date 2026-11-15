@@ -242,6 +242,7 @@ Useful variables, shared with the other ports of this toolkit:
 | `PS3_ANISO=2\|4\|8\|16` | anisotropic filtering (only mipmapped textures). Default off |
 | `PS3_AA=fxaa` / `smaa` / `smaa-fxaa` | anti-aliasing: FXAA or SMAA at the internal resolution; `smaa-fxaa` adds FXAA after scaling (the launcher's Quality profile, with 4K internal) |
 | `PS3_RES_SCALE=1.5\|2\|3` | internal resolution (1080p / 1440p / 4K): every colour and depth target, shadows and reflections included. Above the window's pixels it is supersampled: each frame is reduced into the window with a Lanczos filter, every pixel counted (`PS3_DOWNSCALE=0`: the old shrink) |
+| `PS3_SHADOW_FILTER=auto\|1\|0` | shadow-edge filter. The PS3 compares 2x2 texels of the shadow map, so under a low sun a shadow's edge steps once per texel (Cole's shadow on the tutorial terrace). `auto` (default): above 720p internal, a 4x4 filter that ramps each edge over three texels; at 720p the PS3's own 2x2. `1` / `0` force either |
 | `PS3_UPSCALE=metalfx` | MetalFX spatial upscaling to the window |
 | `PS3_MESH_TRIM=0\|1` | Edge geometry's trimming of tiny triangles (RPCS3's "Disable Mesh Trimming"): off by default only above 1x internal resolution; `0` never trims, `1` always (the PS3's behaviour) |
 | `PS3_SHARPEN=<0..1>` | contrast-adaptive sharpening |
