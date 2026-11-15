@@ -105887,10 +105887,10 @@ index ab59cbee..cf8907c3 100644
                  # right after another branch (fallthrough entry)
                  while k > 0 and seg[k].addr not in targets and not _ends_block(seg[k - 1]):
 diff --git a/tools/spu_lifter.py b/tools/spu_lifter.py
-index 00b771d5..ab591178 100644
+index 00b771d5..89e25f3d 100644
 --- a/tools/spu_lifter.py
 +++ b/tools/spu_lifter.py
-@@ -493,13 +493,225 @@ def compute_link_returns(insns, bounds) -> set:
+@@ -493,14 +493,232 @@ def compute_link_returns(insns, bounds) -> set:
      return returns
  
  
@@ -106115,9 +106115,16 @@ index 00b771d5..ab591178 100644
 +        # ctx->code_base (spu_overlay_register_region_reloc).
 +        self.reloc = reloc
          self.functions: list[LiftedFunction] = []
++        # --insn-guard: LS address -> C predicate; the instruction there runs
++        # only while the predicate is 0, i.e. it becomes a nop when it says 1.
++        self.insn_guard: dict[int, str] = {}
++        # --insn-guard ADDR=SYMBOL:ret: there the predicate's 1 returns
++        # instead (SPU_RET, what a `bi $0` written over the instruction does).
++        self.insn_guard_ret: set[int] = set()
          self.call_targets: set[int] = set()
          self.branch_targets: set[int] = set()
-@@ -532,9 +744,14 @@ class SPULifter:
+         self.unsupported: dict[str, int] = {}
+@@ -532,9 +750,14 @@ class SPULifter:
  
      # ------------------------------------------------------------------ #
      def lift_function(self, insns: list[SPUInstruction],
@@ -106133,7 +106140,7 @@ index 00b771d5..ab591178 100644
  
          internal: set[int] = set()
          for insn in insns:
-@@ -545,9 +762,13 @@ class SPULifter:
+@@ -545,12 +768,22 @@ class SPULifter:
                  internal.add(tgt)
  
          last_insn = None
@@ -106147,7 +106154,16 @@ index 00b771d5..ab591178 100644
              if insn.addr in internal:
                  func.body_lines.append(f"loc_{insn.addr:08X}:")
              c = self._translate(insn, func)
-@@ -565,15 +786,20 @@ class SPULifter:
++            if c and insn.addr in self.insn_guard:
++                if insn.addr in self.insn_guard_ret:
++                    c = (f"if ({self.insn_guard[insn.addr]}(ctx)) {{ SPU_RET(ctx); }}   "
++                         f"/* --insn-guard :ret, as bi $0 */ {c}")
++                else:
++                    c = f"if (!{self.insn_guard[insn.addr]}(ctx)) {{ {c} }}   /* --insn-guard */"
+             if c:
+                 if self.trace:
+                     func.body_lines.append(f"    spu_trace_pc(ctx, 0x{insn.addr:X});")
+@@ -565,15 +798,20 @@ class SPULifter:
          # conditional branch whose not-taken path continues), execution proceeds
          # into the next sequential function. Emit a tail-call so the chain isn't
          # truncated (this was silently dropping execution mid-job).
@@ -106175,7 +106191,7 @@ index 00b771d5..ab591178 100644
  
          # Infinite no-op self-loop (the SPU `br .` halt idiom): a function whose
          # whole body is nops + an unconditional branch back into itself does
-@@ -593,9 +819,51 @@ class SPULifter:
+@@ -593,9 +831,51 @@ class SPULifter:
                      "    spu_halt(ctx); return;",
                  ]
  
@@ -106227,7 +106243,7 @@ index 00b771d5..ab591178 100644
      @staticmethod
      def _branch_target(insn: SPUInstruction):
          """The literal target of a direct branch, or None if it has none.
-@@ -633,6 +901,7 @@ class SPULifter:
+@@ -633,6 +913,7 @@ class SPULifter:
          mn = insn.mnemonic
          ops = _ops(insn.operands)
          addr = insn.addr
@@ -106235,7 +106251,7 @@ index 00b771d5..ab591178 100644
  
          def rt(): return _reg(ops[0])
          def ra(): return _reg(ops[1])
-@@ -754,7 +1023,8 @@ class SPULifter:
+@@ -754,7 +1035,8 @@ class SPULifter:
              "cwx": "spu_cwx", "cdx": "spu_cdx",
          }
          if mn in rr_bin:
@@ -106245,7 +106261,7 @@ index 00b771d5..ab591178 100644
  
          # ---- unary (register) ----
          rr_un = {
-@@ -829,10 +1099,12 @@ class SPULifter:
+@@ -829,10 +1111,12 @@ class SPULifter:
              return f"{g(rt())} = spu_selb({g(ra())}, {g(rb())}, {g(rc)});"
          if mn == "shufb":
              rc = _reg(ops[3])
@@ -106260,7 +106276,7 @@ index 00b771d5..ab591178 100644
          # sfx: extended subtract — RT is also a source (carry-in = low bit of old RT).
          if mn == "sfx":
              return f"{g(rt())} = spu_sfx({g(ra())}, {g(rb())}, {g(rt())});"
-@@ -850,19 +1122,23 @@ class SPULifter:
+@@ -850,19 +1134,23 @@ class SPULifter:
          if mn == "lqd":
              disp, base = _disp_base(ops[1])
              if disp is not None:
@@ -106290,7 +106306,7 @@ index 00b771d5..ab591178 100644
  
          # ---- channel ops ----
          if mn == "rdch":
-@@ -878,6 +1154,9 @@ class SPULifter:
+@@ -878,6 +1166,9 @@ class SPULifter:
          # ---- branches ----
          if mn in ("br", "bra"):
              tgt = self._branch_target(insn)
@@ -106300,7 +106316,7 @@ index 00b771d5..ab591178 100644
              # SELF-LOOP TRAP: `br .` (target == this instruction) is an infinite
              # hang on real SPU -- a deliberate trap, no forward progress. Emitting
              # `goto loc_self` busy-spins the host thread forever; stop the SPU
-@@ -892,7 +1171,14 @@ class SPULifter:
+@@ -892,7 +1183,14 @@ class SPULifter:
              tgt = self._branch_target(insn)
              # Link register: preferred word only, other slots ZERO (real HW /
              # RPCS3 v128::from32r) -- splatting corrupts full-quadword link use.
@@ -106316,7 +106332,7 @@ index 00b771d5..ab591178 100644
              # SELF-LOOP TRAP: `brsl rX, .` (target == this instruction) is an
              # infinite loop on real SPU (re-sets the link each pass, never
              # advances) -- a trap, NOT a call. Emitting a host call recurses
-@@ -917,6 +1203,11 @@ class SPULifter:
+@@ -917,6 +1215,11 @@ class SPULifter:
                  # `bi $r0` returns via host return) + SPU_DRAIN (drains the
                  # callee's own tail-chains so they don't grow the caller frame)
                  # + image save/restore (adopt-on-serve cannot leak upward).
@@ -106328,7 +106344,7 @@ index 00b771d5..ab591178 100644
                  return (f"{link} {{ int32_t _si = (int32_t)ctx->image_id; "
                          f"ctx->host_depth++; {self.prefix}spu_func_{tgt:08X}(ctx); "
                          f"spu_drain_call(ctx, 0x{addr + 4:X}); ctx->host_depth--; spu_img_restore(ctx, _si); }}")
-@@ -928,12 +1219,14 @@ class SPULifter:
+@@ -928,12 +1231,14 @@ class SPULifter:
                  return (f'/* TODO spu: {mn} {insn.operands} */ '
                          f'spu_unsupported(0x{insn.addr:X}, "{mn}");')
              if func.start_addr <= tgt < func.end_addr:
@@ -106345,7 +106361,7 @@ index 00b771d5..ab591178 100644
          # Interrupt enable/disable bits on the bi family (bie/bid, irete/iretd,
          # bisle(d)...): bit 0x40000 = E (enable), 0x80000 = D (disable), taking
          # effect when the branch is TAKEN. The WWS jobmanager's poll loop runs
-@@ -980,17 +1273,19 @@ class SPULifter:
+@@ -980,17 +1285,19 @@ class SPULifter:
              # SPU_DRAIN + image save/restore) so the callee's tail-chains drain
              # here and its `bi $r0` returns via host return.
              # read the target BEFORE writing the link: rt may be the same register as ra
@@ -106370,7 +106386,7 @@ index 00b771d5..ab591178 100644
                      f"if ((ctx->event_status & ctx->event_mask) != 0) {{ "
                      f"{_ied}ctx->pc = _tg; "
                      f"g_spu_trampoline_fn = spu_indirect_branch; return; }} }}")
-@@ -1040,12 +1335,13 @@ class SPULifter:
+@@ -1040,12 +1347,13 @@ class SPULifter:
          if tgt is None:
              return "/* TODO spu: unresolved branch */;"
          if func.start_addr <= tgt < func.end_addr:
@@ -106387,7 +106403,16 @@ index 00b771d5..ab591178 100644
  
      # ------------------------------------------------------------------ #
      def emit_header(self) -> str:
-@@ -1070,7 +1366,8 @@ class SPULifter:
+@@ -1056,6 +1364,8 @@ class SPULifter:
+         for t in sorted(self.call_targets | self.branch_targets):
+             if t not in defined:
+                 lines.append(f"void {self.prefix}spu_func_{t:08X}(spu_context* ctx); /* external */")
++        for sym in sorted(set(self.insn_guard.values())):
++            lines.append(f"int {sym}(spu_context* ctx);   /* --insn-guard: 1 = skip the instruction (:ret: return) */")
+         lines.append("")
+         lines.append("/* Runtime glue (runtime/spu/spu_channels.c) */")
+         lines.append("void spu_register_function(uint32_t addr, void (*fn)(spu_context*));")
+@@ -1070,7 +1380,8 @@ class SPULifter:
          weak = "__attribute__((weak)) " if getattr(self, "weak_emit", False) else ""
          for f in self.functions:
              lines.append(f"void {weak}{f.name}(spu_context* ctx) {{")
@@ -106397,7 +106422,7 @@ index 00b771d5..ab591178 100644
                  lines.append(b if b.endswith(":") else f"    {b}")
              lines.append("}")
              lines.append("")
-@@ -1089,7 +1386,7 @@ class SPULifter:
+@@ -1089,7 +1400,7 @@ class SPULifter:
              lines.append(" * branches that escape a function's range). */")
              for t in externs:
                  lines.append(f"void {self.prefix}spu_func_{t:08X}(spu_context* ctx) {{")
@@ -106406,7 +106431,7 @@ index 00b771d5..ab591178 100644
                               f"g_spu_trampoline_fn = spu_indirect_branch; return;")
                  lines.append("}")
              lines.append("")
-@@ -1133,6 +1430,15 @@ def main() -> None:
+@@ -1133,6 +1444,15 @@ def main() -> None:
                          "targets + STT_FUNC symbols). When set, .text is "
                          "read from this ELF and the positional <input> arg "
                          "is ignored.")
@@ -106422,7 +106447,23 @@ index 00b771d5..ab591178 100644
      p.add_argument("--trace", action="store_true",
                     help="Emit spu_trace_pc/spu_trace_rt around each instruction "
                          "for §3 diff-vs-RPCS3 validation. Output goes to stderr "
-@@ -1297,7 +1603,9 @@ def main() -> None:
+@@ -1184,6 +1504,15 @@ def main() -> None:
+                         "dispatch table at 0x1BD8, `br` into a fallthrough chain, "
+                         "dispatched blocks later -- classified as a return, which "
+                         "silently skipped every job-command handler).")
++    p.add_argument("--insn-guard", default="",
++                   help="Comma-separated ADDR=SYMBOL pairs: the instruction at LS "
++                        "ADDR is emitted as `if (!SYMBOL(ctx)) { ... }`, so a port "
++                        "can turn one instruction into a nop at run time -- what a "
++                        "patch to the image's bytes would do, which a lifted image "
++                        "never sees. The port defines int SYMBOL(spu_context*). "
++                        "E.g. inFAMOUS 2's Edge geometry job: 0xA7C0=<fn> skips the "
++                        "branch into the triangle culling (RPCS3's 'Disable Mesh "
++                        "Trimming') while the targets are scaled.")
+     args = p.parse_args()
+ 
+     if args.auto_functions:
+@@ -1297,7 +1626,27 @@ def main() -> None:
  
      insns = disassemble_spu(data, base)
  
@@ -106430,10 +106471,28 @@ index 00b771d5..ab591178 100644
 +    lifter = SPULifter(trace=args.trace, prefix=args.symbol_prefix, reloc=args.relocatable,
 +                       reg_locals=True if args.reg_locals else None,
 +                       lean_float=False if args.no_lean_float else None)
++    for item in (x.strip() for x in args.insn_guard.split(",")):
++        if not item:
++            continue
++        a, _, sym = item.partition("=")
++        sym, _, mode = sym.strip().partition(":")
++        if not sym.isidentifier() or mode not in ("", "ret"):
++            p.error(f"--insn-guard {item!r}: expected ADDR=SYMBOL or ADDR=SYMBOL:ret")
++        lifter.insn_guard[int(a, 0)] = sym
++        if mode == "ret":
++            lifter.insn_guard_ret.add(int(a, 0))
++    if lifter.insn_guard:
++        known = {i.addr for i in insns}
++        for a in sorted(lifter.insn_guard):
++            if a not in known:
++                p.error(f"--insn-guard 0x{a:X}: no instruction there")
++        sys.stderr.write("[spu_lifter] insn guard at: %s\n" % ", ".join(
++            "0x%X=%s%s" % (a, lifter.insn_guard[a], ":ret" if a in lifter.insn_guard_ret else "")
++            for a in sorted(lifter.insn_guard)))
      lifter.bi_r0_jump = compute_bi_r0_jumps(insns, bounds)
      if lifter.bi_r0_jump:
          print(f"  {len(lifter.bi_r0_jump)} `bi $r0` computed-jump site(s) "
-@@ -1320,16 +1628,29 @@ def main() -> None:
+@@ -1320,16 +1669,29 @@ def main() -> None:
                f"{', '.join(f'0x{a:X}' for a in sorted(lifter.link_return))}")
      lifter.func_starts = {s for s, e in bounds}  # for fall-through tail-call chaining
      groups = {}
@@ -106746,6 +106805,159 @@ index 00000000..9f11861f
 +    r = subprocess.run([str(exe)], timeout=10)
 +    print('PASS' if r.returncode == 0 else 'FAIL')
 +    raise SystemExit(r.returncode)
+diff --git a/tools/test_spu_insn_guard.py b/tools/test_spu_insn_guard.py
+new file mode 100644
+index 00000000..6e005e36
+--- /dev/null
++++ b/tools/test_spu_insn_guard.py
+@@ -0,0 +1,147 @@
++#!/usr/bin/env python3
++"""spu_lifter --insn-guard: one instruction becomes a nop while a port predicate says so.
++
++A patch to an SPU image's bytes (RPCS3's "Disable Mesh Trimming" for inFAMOUS 2
++nops a `brnz` of the Edge geometry job) never reaches a lifted image, so the
++lifter can guard an instruction instead: `if (!PRED(ctx)) { <instruction> }`.
++
++Checks: the guarded line wraps exactly the unguarded translation, nothing else
++in the function changes, the header declares the predicate, the CLI rejects an
++address with no instruction; then a compiled run of a tiny function (il, brnz
++over an il, il) must take the branch while the predicate returns 0 -- the
++original program -- and fall through, as the nop'ed program does, when it
++returns 1.
++
++ADDR=SYMBOL:ret (RPCS3's "Disable Mesh Trimming" for inFAMOUS 1 writes a
++`bi $0` over the first instruction of an Edge job function): the predicate's 1
++returns there (SPU_RET, to $0) before the instruction, its 0 runs it as before.
++"""
++import os
++import shutil
++import struct
++import subprocess
++import sys
++import tempfile
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++sys.path.insert(0, HERE)
++import spu_lifter  # noqa: E402
++
++BASE = 0x100
++WORDS = [
++    (0x081 << 23) | (1 << 7) | 4,    # 0x100 il   r4, 1
++    (0x042 << 23) | (3 << 7) | 4,    # 0x104 brnz r4, 0x110
++    (0x081 << 23) | (7 << 7) | 6,    # 0x108 il   r6, 7     (skipped by the branch)
++    0x40200000,                      # 0x10C nop
++    (0x081 << 23) | (2 << 7) | 5,    # 0x110 il   r5, 2
++]
++DATA = b"".join(struct.pack(">I", w) for w in WORDS)
++
++
++def lift(guard, ret=()):
++    lf = spu_lifter.SPULifter(prefix="t_", reg_locals=False)
++    lf.insn_guard = dict(guard)
++    lf.insn_guard_ret = set(ret)
++    lf.func_starts = set()
++    insns = spu_lifter.disassemble_spu(DATA, BASE)
++    f = lf.lift_function(insns, BASE, BASE + len(DATA))
++    return f.body_lines, lf.emit_header()
++
++
++def structural():
++    plain, plain_h = lift({})
++    guarded, guarded_h = lift({0x104: "pred"})
++    assert len(plain) == len(guarded), (plain, guarded)
++    diff = [(a, b) for a, b in zip(plain, guarded) if a != b]
++    assert len(diff) == 1, diff
++    a, b = diff[0]
++    assert "goto loc_00000110" in a, a
++    assert b.startswith("    if (!pred(ctx)) { " + a.strip() + " }"), b
++    assert "int pred(spu_context* ctx);" in guarded_h and "pred" not in plain_h
++    ret, _ = lift({0x100: "pred"}, ret={0x100})
++    diff = [(a, b) for a, b in zip(plain, ret) if a != b]
++    assert len(diff) == 1, diff
++    a, b = diff[0]
++    assert b.startswith("    if (pred(ctx)) { SPU_RET(ctx); }") and b.endswith(a.strip()), b
++    print("PASS: --insn-guard structure (skip and :ret)")
++
++
++def cli():
++    with tempfile.TemporaryDirectory() as tmp:
++        blob = os.path.join(tmp, "m.bin")
++        with open(blob, "wb") as f:
++            f.write(DATA)
++        base = [sys.executable, os.path.join(HERE, "spu_lifter.py"), blob, "--base", hex(BASE), "-o", tmp]
++        bad = subprocess.run(base + ["--insn-guard", "0x102=pred"], capture_output=True, text=True)
++        assert bad.returncode != 0 and "no instruction there" in bad.stderr, bad.stderr
++        bad = subprocess.run(base + ["--insn-guard", "0x104"], capture_output=True, text=True)
++        assert bad.returncode != 0 and "ADDR=SYMBOL" in bad.stderr, bad.stderr
++        bad = subprocess.run(base + ["--insn-guard", "0x100=pred:jump"], capture_output=True, text=True)
++        assert bad.returncode != 0 and "ADDR=SYMBOL:ret" in bad.stderr, bad.stderr
++        ok = subprocess.run(base + ["--insn-guard", "0x100=pred:ret"], capture_output=True, text=True)
++        assert ok.returncode == 0 and "0x100=pred:ret" in ok.stderr, ok.stderr
++    print("PASS: --insn-guard arguments")
++
++
++PRELUDE = r"""
++#include <stdint.h>
++#include <stdio.h>
++typedef union { uint32_t _u32[4]; } u128;
++typedef struct { u128 gpr[128]; uint32_t pc; } spu_context;
++static u128 spu_il(int32_t v) { u128 r = { { (uint32_t)v, (uint32_t)v, (uint32_t)v, (uint32_t)v } }; return r; }
++static int g_skip;
++#define SPU_RET(ctx) do { (ctx)->pc = (ctx)->gpr[0]._u32[0]; return; } while (0)
++int pred(spu_context* ctx) { (void)ctx; return g_skip; }
++"""
++
++MAIN = r"""
++int main(void) {
++    for (g_skip = 0; g_skip < 2; g_skip++) {
++        static spu_context c;
++        c = (spu_context){0};
++        f(&c);
++        printf("%u %u\n", c.gpr[6]._u32[0], c.gpr[5]._u32[0]);
++    }
++    return 0;
++}
++"""
++
++
++def semantic():
++    cc = shutil.which(os.environ.get("CC", "cc")) or shutil.which("clang") or shutil.which("gcc")
++    if not cc:
++        print("SKIP: no C compiler for the semantic check")
++        return
++    body, _ = lift({0x104: "pred"})
++    src = PRELUDE + "void f(spu_context* ctx) {\n" + "\n".join(body) + "\n}\n" + MAIN
++    with tempfile.TemporaryDirectory() as tmp:
++        c = os.path.join(tmp, "g.c")
++        with open(c, "w") as f:
++            f.write(src)
++        exe = os.path.join(tmp, "g")
++        subprocess.run([cc, "-O2", "-w", c, "-o", exe], check=True)
++        out = subprocess.run([exe], check=True, capture_output=True, text=True).stdout.split("\n")
++    # predicate 0: brnz taken, r6 never set; predicate 1: the branch is a nop, r6 = 7
++    assert out[0] == "0 2" and out[1] == "7 2", out
++    # :ret on the first instruction: predicate 0 runs the function (r4 = 1,
++    # the branch taken, r5 = 2); predicate 1 returns to $0 at once: nothing set
++    body, _ = lift({0x100: "pred"}, ret={0x100})
++    main = MAIN.replace("c = (spu_context){0};", "c = (spu_context){0}; c.gpr[0]._u32[0] = 0x4444;").replace(
++        'printf("%u %u\\n", c.gpr[6]._u32[0], c.gpr[5]._u32[0]);',
++        'printf("%u %u %u %x\\n", c.gpr[4]._u32[0], c.gpr[6]._u32[0], c.gpr[5]._u32[0], c.pc);')
++    src = PRELUDE + "void f(spu_context* ctx) {\n" + "\n".join(body) + "\n}\n" + main
++    with tempfile.TemporaryDirectory() as tmp:
++        c = os.path.join(tmp, "r.c")
++        with open(c, "w") as f:
++            f.write(src)
++        exe = os.path.join(tmp, "r")
++        subprocess.run([cc, "-O2", "-w", c, "-o", exe], check=True)
++        out = subprocess.run([exe], check=True, capture_output=True, text=True).stdout.split("\n")
++    assert out[0] == "1 0 2 0" and out[1] == "0 0 0 4444", out
++    print("PASS: --insn-guard semantics (skip and :ret)")
++
++
++if __name__ == "__main__":
++    structural()
++    cli()
++    semantic()
 diff --git a/tools/test_spu_reg_locals.py b/tools/test_spu_reg_locals.py
 new file mode 100644
 index 00000000..a0686e33
