@@ -673,18 +673,17 @@ function bindGraphics(bindRange: (id: string, key: keyof Settings, fmt: (v: numb
   bindPreset();
 }
 
-/** Ready-made image-quality profiles: they only set the four image options
- * above (the GPU light/SSAO cost nothing visually and stay as they are). The
+/** Ready-made image-quality profiles, including internal resolution. The
  * list shows the profile the current values match, or "custom". */
-const PRESETS: Record<string, Pick<Settings, "aniso" | "aa" | "sharpen" | "upscale">> = {
-  performance: { aniso: 0, aa: "", sharpen: 0, upscale: "" },
-  balanced: { aniso: 4, aa: "fxaa", sharpen: 0.2, upscale: "" },
-  quality: { aniso: 16, aa: "smaa", sharpen: 0.35, upscale: "metalfx" },
+const PRESETS: Record<string, Pick<Settings, "aniso" | "aa" | "sharpen" | "upscale" | "resScale">> = {
+  performance: { aniso: 0, aa: "", sharpen: 0, upscale: "", resScale: "" },
+  balanced: { aniso: 4, aa: "fxaa", sharpen: 0, upscale: "metalfx", resScale: "1.5" },
+  quality: { aniso: 16, aa: "smaa-fxaa", sharpen: 0, upscale: "metalfx", resScale: "3" },
 };
 
 function currentPreset(): string {
   for (const [name, p] of Object.entries(PRESETS)) {
-    if (settings.aniso === p.aniso && settings.aa === p.aa && settings.upscale === p.upscale &&
+    if (settings.aniso === p.aniso && settings.aa === p.aa && settings.upscale === p.upscale && settings.resScale === p.resScale &&
         Math.abs(settings.sharpen - p.sharpen) < 0.005) return name;
   }
   return "custom";

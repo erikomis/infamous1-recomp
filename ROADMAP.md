@@ -48,6 +48,10 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 ### Graphics
 
 - [x] Anisotropic filtering up to 16× (`out/aniso-smoke.log`, `out/aniso16/`).
+- [x] SMAA + FXAA (2026-11-15): SMAA at the internal resolution, then FXAA after scaling with lower thresholds (0.0833 / 0.0312) for the steps scaling leaves; in the launcher, the F1 menu and `recomplauncher.json`. The launcher's Quality profile is now 4K internal + SMAA + FXAA + 16× + MetalFX. `test_metal_hybrid_aa`; a still comparison only, shimmer in motion not measured.
+- [x] Face culling FRONT_AND_BACK (2026-11-15): it was drawn as FRONT (back faces showed); triangles are no longer submitted in that state (`test_cull_both`).
+- [ ] The fragmented shadow in Erik's screenshot: shadow maps (1024×1024, PCF) confirmed working (`infamous1-lle/notes/rendering-20261115.md`), no fix found yet.
+- [ ] Pop-in: RPCS3's "Disable Mesh Trimming" patch maps to the SPU job `jobmod_2e6aac472eee_ec2c0` (image 202, `0x006158A0`), which is lifted code: writing the opcode in RAM does not reach it (the notes above).
 - [x] Supersampling (2026-11-13): an internal resolution above the window's pixels is reduced into the window with a Lanczos filter (MetalPerformanceShaders, `PS3_DOWNSCALE=0` off) instead of the layer sampling it; `tools/test_metal_downscale.py` (a 1-pixel checkerboard reduced 3x comes out an even grey). Not yet compared by eye in a window.
 - [ ] A/B captures of the image levers (FXAA/SMAA, `PS3_RES_SCALE`, MetalFX, sharpening) on the same scene, with `tools/capture.sh`.
 - [ ] Check the rendering on later scenes (lighting, shadows, water, particles) in a window; the inFAMOUS 2 fixes were found that way.

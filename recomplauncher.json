@@ -97,11 +97,12 @@
       "id": "aa",
       "label": "Anti-aliasing",
       "group": "Picture",
-      "help": "Smooths jagged edges. SMAA is sharper than FXAA and costs a little more.",
+      "help": "Smooths jagged edges. SMAA is sharper than FXAA and costs a little more; SMAA + FXAA also smooths the edges left after scaling.",
       "choices": [
         { "label": "Off", "set": { "aa": "\"\"" } },
         { "label": "FXAA", "set": { "aa": "\"fxaa\"" } },
-        { "label": "SMAA", "set": { "aa": "\"smaa\"" } }
+        { "label": "SMAA", "set": { "aa": "\"smaa\"" } },
+        { "label": "SMAA + FXAA", "set": { "aa": "\"smaa-fxaa\"" } }
       ],
       "defaults": { "aa": "\"\"" }
     },

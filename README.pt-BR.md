@@ -247,7 +247,7 @@ Variáveis úteis, compartilhadas com os outros ports deste toolkit:
 | Variável | O que faz |
 | --- | --- |
 | `PS3_ANISO=2\|4\|8\|16` | filtragem anisotrópica (só texturas com mipmaps). Padrão desligado |
-| `PS3_AA=fxaa` / `smaa` | anti-aliasing na imagem de 1280×720 |
+| `PS3_AA=fxaa` / `smaa` / `smaa-fxaa` | anti-aliasing: FXAA ou SMAA na resolução interna; `smaa-fxaa` soma o FXAA depois da escala (o perfil Qualidade do launcher, com 4K interno) |
 | `PS3_RES_SCALE=1.5\|2\|3` | resolução interna (1080p / 1440p / 4K): todos os alvos de cor e profundidade, sombras e reflexos incluídos. Acima dos pixels da janela vira supersampling: cada quadro é reduzido para a janela com um filtro Lanczos, contando todos os pixels (`PS3_DOWNSCALE=0`: a redução antiga) |
 | `PS3_UPSCALE=metalfx` | upscaling espacial MetalFX até a janela |
 | `PS3_SHARPEN=<0..1>` | nitidez adaptativa ao contraste |
