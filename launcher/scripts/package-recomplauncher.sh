@@ -103,5 +103,7 @@ rm -f "$zip"
 print -r -- "==> $zip"
 /usr/bin/zipinfo -1 "$zip" | grep -E '^[^/]+/?$|^[^/]+\.app/Contents/MacOS/[^/]+$'
 /usr/bin/shasum -a 256 "$zip"
-if /usr/bin/zipinfo "$zip" | /usr/bin/grep -q -e "$USER"; then fail "$zip: a file name holds the account's name"; fi
+# the names inside the zip only (zipinfo's header names the zip itself)
+names=$(/usr/bin/zipinfo -1 "$zip")
+[[ $names != *$USER* ]] || fail "$zip: a file name holds the account's name"
 print -r -- "Not uploaded: attach it to a GitHub release (tag v$version) by hand when you publish one."
