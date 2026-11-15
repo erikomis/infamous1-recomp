@@ -102,6 +102,7 @@ PORT_FILES = ('CMakeLists.txt', 'main.cpp', 'stubs.cpp', 'gpu_light.c', 'gpu_ssa
               'runtime_overrides/cellGame.c',   # HDD boot: CATEGORY from PARAM.SFO
               'ssao_gpu.c', 'ssao_gpu.h', 'edge_watch.c', 'game_clock.c',
               'heartbeat.c',       # the low-health heartbeat on the controller
+              'mesh_trim.c',       # Edge geometry's mesh trimming off at scaled resolutions
               'game_patches.cpp', 'run.sh', 'config.toml',
               'macos_host.m',      # App Nap off, thread QoS (macOS)
               'Info.plist.in',     # the macOS app bundle's Info.plist (Game Mode)
@@ -135,6 +136,12 @@ WWSJOB_PM_SIZE = 11648
 # The audio image's call-return PCs (spu_0003_at_006A4E80) are added by
 # tools/relift_spu_returns.py.
 JOBMOD_EXTRA = (('jobmod_542edebc6499_e80', ('0x18BB0',)),)
+# instructions the port decides about at run time (spu_lifter.py --insn-guard):
+# the Edge geometry function that trims meshes returns at once while the
+# targets are scaled (mesh_trim.c; RPCS3's "Disable Mesh Trimming" writes a
+# bi $0 there). (module, ((LS address, word expected there, predicate[:ret]),
+# ...)); a module or a word that is not there is lifted as it is, with a warning
+JOBMOD_GUARD = (('jobmod_2e6aac472eee_ec2c0', ((0x8520, 0x1C450191, 'infamous1_edge_skip_trim:ret'),)),)
 
 GB = 1024 ** 3
 WORK_BYTES = int(1.5 * GB)      # toolkit, venv, lifts, objects, executable
@@ -857,7 +864,7 @@ class Rebuild:
         # the spu step runs a port tool too (relift_spu_returns.py)
         k['spu'] = sha256_text('spu', k['toolkit'], k['venv'], elf, k['port'],
                                '%#x:%d' % (WWSJOB_PM_EA, WWSJOB_PM_SIZE))
-        k['jobs'] = sha256_text('jobs', k['spu'], k['port'])
+        k['jobs'] = sha256_text('jobs', k['spu'], k['port'], repr(JOBMOD_EXTRA), repr(JOBMOD_GUARD))
         k['dlc'] = sha256_text('dlc', k['game'], rap, bool(os.environ.get('PS3_RAP_KEY')))
         k['compile'] = sha256_text('compile', k['toolkit'], k['port'], k['firmware'], k['ppu'],
                                    k['spu'], k['jobs'])
@@ -1188,6 +1195,23 @@ class Rebuild:
         # "branched into unlifted LS"), added by hand to the dev build
         for mod, extra in JOBMOD_EXTRA:
             self.run('jobs', [self.py, os.path.join(tools, 'relift_jobmod.py'), mod, '--extra', ','.join(extra),
+                              '--jobmods', 'spu/jobmods', '--out', 'spu'], cwd=self.port)
+        try:
+            with open(self.T('spu_lifter.py')) as f:
+                guard_ok = ':ret' in f.read()
+        except OSError:
+            guard_ok = False
+        if not guard_ok:
+            emit('WARN', 'jobs', "the toolkit's spu_lifter.py has no --insn-guard :ret; Edge geometry lifted without it")
+        for mod, guards in JOBMOD_GUARD if guard_ok else ():
+            binp = os.path.join(self.port, 'spu', 'jobmods', mod + '.bin')
+            raw = open(binp, 'rb').read() if os.path.isfile(binp) else b''
+            ok = [f'0x{a:X}={fn}' for a, word, fn in guards
+                  if len(raw) >= a - 0x4000 + 4 and int.from_bytes(raw[a - 0x4000:a - 0x4000 + 4], 'big') == word]
+            if len(ok) != len(guards):
+                emit('WARN', 'jobs', f'{mod}: not the expected code; lifted without its run-time guards')
+                continue
+            self.run('jobs', [self.py, os.path.join(tools, 'relift_jobmod.py'), mod, '--insn-guard', ','.join(ok),
                               '--jobmods', 'spu/jobmods', '--out', 'spu'], cwd=self.port)
         # No DA7ABA5E data modules in this EBOOT, and the relocatable-job
         # scanner finds none: lift_datamods.py / lift_relocmods.py do not apply.

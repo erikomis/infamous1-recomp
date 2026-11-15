@@ -250,6 +250,7 @@ Variáveis úteis, compartilhadas com os outros ports deste toolkit:
 | `PS3_AA=fxaa` / `smaa` / `smaa-fxaa` | anti-aliasing: FXAA ou SMAA na resolução interna; `smaa-fxaa` soma o FXAA depois da escala (o perfil Qualidade do launcher, com 4K interno) |
 | `PS3_RES_SCALE=1.5\|2\|3` | resolução interna (1080p / 1440p / 4K): todos os alvos de cor e profundidade, sombras e reflexos incluídos. Acima dos pixels da janela vira supersampling: cada quadro é reduzido para a janela com um filtro Lanczos, contando todos os pixels (`PS3_DOWNSCALE=0`: a redução antiga) |
 | `PS3_UPSCALE=metalfx` | upscaling espacial MetalFX até a janela |
+| `PS3_MESH_TRIM=0\|1` | o corte de triângulos minúsculos do Edge geometry ("Disable Mesh Trimming" do RPCS3): desligado por padrão só acima da resolução interna 1x; `0` nunca corta, `1` sempre (como no PS3) |
 | `PS3_SHARPEN=<0..1>` | nitidez adaptativa ao contraste |
 | `PS3_WINDOW_MODE=windowed\|fullscreen\|borderless` | como o jogo abre |
 | `PS3_MEM_ALLOC_SIZE=<hex>` | a janela do alocador, de 16 MB a 3 GB (padrão 256 MB; o `run.sh` usa 768 MB) |

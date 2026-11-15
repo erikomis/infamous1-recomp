@@ -212,6 +212,7 @@ add_executable(${PROJECT_NAME}
     edge_watch.c
     game_clock.c
     heartbeat.c
+    mesh_trim.c
     game_patches.cpp
     ssao_gpu.c
     ${LLE_SOURCES}

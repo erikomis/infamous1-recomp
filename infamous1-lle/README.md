@@ -61,6 +61,12 @@ applied by `../tools/setup_toolkit.sh`): the inFAMOUS 2 port's patch, plus
 
 In the port:
 
+- `mesh_trim.c`: RPCS3's "Disable Mesh Trimming" at run time. `rebuild.py`
+  relifts the Edge geometry job `jobmod_2e6aac472eee_ec2c0` with
+  `--insn-guard 0x8520=infamous1_edge_skip_trim:ret` (`JOBMOD_GUARD`; the
+  toolkit's lifter gains the `:ret` form), so its triangle trimming returns at
+  once while the targets are scaled; `PS3_MESH_TRIM=0|1` forces it. Test:
+  the toolkit's `tools/test_spu_insn_guard.py`.
 - `heartbeat.c`: below 35% of Cole's hit points (`[0x8F7580]` `+0x750` max,
   `+0x754` current, found as `notes/health/README.md` tells) a lub-dub on the
   motors through `cellPad_host_pulse`, silent while the world clock is stopped
