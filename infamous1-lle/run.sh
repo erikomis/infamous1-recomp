@@ -10,6 +10,17 @@
 here=$(cd "$(dirname "$0")" && pwd)
 vfs="${INFAMOUS1_VFS:-$here/../infamous1/vfs}"
 
+# Both archives belong to inFAMOUS 1. If install2 is missing, FIOS retries
+# its resources indefinitely and the window stays on the loading logo.
+for archive in install1/infamous1.psarc_s install2/infamous2.psarc_s; do
+    path="$vfs/PS3_GAME/USRDIR/cache/psarc/$archive"
+    if [ ! -s "$path" ]; then
+        echo "[boot] ERROR: required game archive is missing or empty: $path" >&2
+        echo "[boot] Restore the archive from your complete NPUA80480 installation, then restart the game." >&2
+        exit 1
+    fi
+done
+
 export PS3_VFS_ROOT="$vfs"
 export PS3_HDD0_ROOT="$vfs/dev_hdd0"
 export PS3_DEV_FLASH="${PS3_DEV_FLASH:-$HOME/Library/Application Support/rpcs3/dev_flash}"
@@ -166,6 +177,7 @@ export GCM_PARK_GRACE_MS="${GCM_PARK_GRACE_MS:-1000}"
 #   PS3_CLARITY=-1..1           local contrast; PS3_SHADOWS / PS3_MIDTONES /
 #                               PS3_HIGHLIGHTS=-1..1 a tone curve
 #   PS3_LUT_PRESET=warm|cool|film|vivid  a built-in colour grade
+#   PS3_AA=smaa-fxaa          SMAA internally, FXAA after scaling (softer edges)
 #   PS3_RES_SCALE=1.5|2|3       internal resolution: the game renders at 1080p,
 #                               1440p or 4K instead of 720p (restart to change)
 #   PS3_ASPECT=21:9|32:9        ultrawide: a wider view (hor+), the HUD kept 16:9
