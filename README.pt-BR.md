@@ -227,6 +227,15 @@ muda o limite). A imagem do próprio jogo fica em preto e branco mais ou menos
 no mesmo ponto. Como a vida do Cole foi achada:
 [`infamous1-lle/notes/health/`](infamous1-lle/notes/health/README.md).
 
+**Barra de luz no karma do Cole** (DualSense, DualShock 4): com a cor do jogo,
+a barra de luz segue o nível de karma do Cole, lido da memória do jogo: azul
+elétrico no neutro, azuis mais claros para Guardian, Champion e Hero, de
+laranja a vermelho puro para Thug, Outlaw e Infamous, mudando de cor em meio
+segundo quando o nível muda; o brilho vermelho com os golpes continua por
+cima. Uma cor escolhida no launcher fica fixa (`PS3_KARMA_LIGHT=0` desliga).
+Como o karma foi achado:
+[`infamous1-lle/notes/karma/`](infamous1-lle/notes/karma/README.md).
+
 
 | Tecla | PS3 |
 | --- | --- |

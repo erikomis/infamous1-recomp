@@ -79,7 +79,7 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 - [ ] Feel them on a DualSense, with Steam quit (Steam Input rewrites the controller's output: that was why nothing reached it in the Resistance ports either).
 - [x] Heartbeat at low health (2026-11-13): Cole's hit points found (`[0x8F7580] +0x750/+0x754`, `infamous1-lle/notes/health/`), the inFAMOUS 2 port's heartbeat and the toolkit's `cellPad_host_pulse`; checked by writing his health in the tutorial (on at 30%, faster at 5%, off at 100%, the game's own picture grey and back).
 - [ ] The heartbeat with a real hit and a death and respawn (does the pointer follow the new hero?), and silent in cutscenes that keep the world clock running.
-- [ ] The light bar following Cole's karma (blue/red) from the game's memory (not found next to health).
+- [x] The light bar following Cole's karma (blue/red) from the game's memory: f32 at `0x7D6128` (the save game's image in the progress object `0x7D6110`), ranks from the game's own table (`infamous1-lle/notes/karma/README.md`). Read in the game from Erik's save (50.0, Guardian) and the tutorial's (0, neutral); still to see on a DualSense through a karma change.
 - [ ] The in-game menu (F1 / Cmd+, / L3+R3) on this game.
 
 ### Rebuild

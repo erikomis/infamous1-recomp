@@ -198,6 +198,8 @@ extern "C" void rsx_metal_backend_note_guest_frame(void);
 extern "C" void infamous1_gclock_frame(void);
 /* heartbeat.c: the low-health heartbeat on the controller (PS3_HEARTBEAT). */
 extern "C" void infamous1_heartbeat_frame(void);
+/* karma_light.c: the light bar follows Cole's karma (PS3_KARMA_LIGHT). */
+extern "C" void infamous1_karma_frame(void);
 /* Toolkit sys_timer.c: PS3_TB_SCALE, the guest timebase's rate in percent.
  * Weak: a toolkit without the knob links, and the toggle does nothing. */
 #if defined(_MSC_VER)
@@ -210,6 +212,7 @@ static void present_guest_frame(void)
 {
     infamous1_gclock_frame();
     infamous1_heartbeat_frame();
+    infamous1_karma_frame();
     const uint64_t ft_t0 = PS3_FT_ON() ? ps3_ft_now() : 0;
     rsx_backend_present();
     if (ft_t0) ps3_ft_span(PS3_FT_PRESENT, 0, 0, 0, ft_t0, ps3_ft_now());
@@ -431,8 +434,9 @@ int main(int argc, char** argv)
     }
 #ifndef _WIN32
     /* The DualSense / DualShock 4 light bar in an electric blue, Cole's
-     * lightning (the launcher's "game's colour"); PS3_PAD_LIGHT=off or
-     * another RRGGBB in the environment wins (cellPad.c). */
+     * lightning (the launcher's "game's colour"), which karma_light.c then
+     * turns with his karma; PS3_PAD_LIGHT=off or another RRGGBB in the
+     * environment wins (cellPad.c), and keeps its colour. */
     setenv("PS3_PAD_LIGHT", "1e78ff", 0);
 #endif
     /* PS3RECOMP_ENG_GPU_LIGHT: the SPU light job's pixel work moves to the GPU. */

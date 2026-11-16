@@ -1495,7 +1495,7 @@ index d403baff..76c5505f 100644
 +
  #endif /* PS3RECOMP_CELL_GEM_H */
 diff --git a/libs/input/cellPad.c b/libs/input/cellPad.c
-index 621d53e2..e5764b25 100644
+index 621d53e2..91f82ae8 100644
 --- a/libs/input/cellPad.c
 +++ b/libs/input/cellPad.c
 @@ -10,6 +10,9 @@
@@ -1770,7 +1770,7 @@ index 621d53e2..e5764b25 100644
  
          s_host_state[i].connected = 1;
          XINPUT_GAMEPAD* gp = &state.Gamepad;
-@@ -287,63 +527,577 @@ static u8 pad_sdl_trigger_to_u8(int raw)
+@@ -287,63 +527,595 @@ static u8 pad_sdl_trigger_to_u8(int raw)
      return (u8)val;
  }
  
@@ -2066,6 +2066,24 @@ index 621d53e2..e5764b25 100644
 +    memcpy(rgb, c, 3);
 +    return mode;
 +}
++/* cellPad_host_set_light(0xRRGGBB): a port's own colour for the light bar in
++ * place of PS3_PAD_LIGHT's (inFAMOUS: Cole's karma), -1 back to it. Only
++ * over a configured colour: an unset PS3_PAD_LIGHT (SDL's own) and "off"
++ * stay as they are. The red glow with the rumble goes on top as before. */
++static volatile int s_host_light = -1;
++void cellPad_host_set_light(int rgb)
++{
++    __atomic_store_n(&s_host_light, rgb < 0 ? -1 : (rgb & 0xFFFFFF), __ATOMIC_RELAXED);
++}
++static int pad_light_colour(uint8_t rgb[3])
++{
++    const int mode = pad_light_cfg(rgb);
++    const int host = __atomic_load_n(&s_host_light, __ATOMIC_RELAXED);
++    if (mode == 1 && host >= 0) {
++        rgb[0] = (uint8_t)(host >> 16); rgb[1] = (uint8_t)(host >> 8); rgb[2] = (uint8_t)host;
++    }
++    return mode;
++}
 +static int pad_light_hit(void)
 +{
 +    static int on = -1;
@@ -2090,7 +2108,7 @@ index 621d53e2..e5764b25 100644
 +    memset(x, 0, sizeof *x);
 +    SDL_GameControllerSetPlayerIndex(gc, p);   /* the DualSense's player lights */
 +    uint8_t c[3];
-+    x->light_set = pad_light_cfg(c);
++    x->light_set = pad_light_colour(c);
 +    if (x->light_set && SDL_GameControllerHasLED(gc)) {
 +        if (x->light_set < 0) c[0] = c[1] = c[2] = 0;
 +        SDL_GameControllerSetLED(gc, c[0], c[1], c[2]);
@@ -2108,7 +2126,7 @@ index 621d53e2..e5764b25 100644
 +{
 +    PadExtras* x = &s_extra[p];
 +    uint8_t c[3];
-+    const int mode = pad_light_cfg(c);
++    const int mode = pad_light_colour(c);
 +    if (!mode || !SDL_GameControllerHasLED(gc)) return;
 +    if (mode < 0) c[0] = c[1] = c[2] = 0;
 +    if (pad_light_hit()) {
@@ -2388,7 +2406,7 @@ index 621d53e2..e5764b25 100644
  
          /* Pressure: SDL has digital buttons, so 0 or 255 */
          s_host_state[i].press_up       = (btns & CELL_PAD_CTRL_UP)       ? 255 : 0;
-@@ -357,35 +1111,37 @@ static void pad_poll_sdl2(void)
+@@ -357,35 +1129,37 @@ static void pad_poll_sdl2(void)
          s_host_state[i].press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
          s_host_state[i].press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
      }
@@ -2438,7 +2456,7 @@ index 621d53e2..e5764b25 100644
  }
  
  #endif /* PAD_BACKEND_SDL2 */
-@@ -490,34 +1246,224 @@ static void pad_poll_file(u16* out_btns, int* out_lx, int* out_ly, int* out_rx,
+@@ -490,34 +1264,224 @@ static void pad_poll_file(u16* out_btns, int* out_lx, int* out_ly, int* out_rx,
  }
  
  /* Keyboard pad (macOS window): the Metal window records key state by
@@ -2687,7 +2705,7 @@ index 621d53e2..e5764b25 100644
      /* PS3_PAD_FILE: its buttons are held in addition to the keys; an
       * off-centre file axis wins over the keyboard's. */
      { u16 fb; int flx, fly, frx, fry;
-@@ -528,10 +1474,71 @@ static void pad_poll_keys(void)
+@@ -528,10 +1492,71 @@ static void pad_poll_keys(void)
        if (frx != 128) rx = frx;
        if (fry != 128) ry = fry; }
      PadHostState* hs = &s_host_state[0];
@@ -2759,7 +2777,7 @@ index 621d53e2..e5764b25 100644
  static void pad_poll_backend(void)
  {
      /* Benign race: two threads may poll in the same tick. That costs one extra
-@@ -539,6 +1546,7 @@ static void pad_poll_backend(void)
+@@ -539,6 +1564,7 @@ static void pad_poll_backend(void)
      static unsigned long long s_last_ms = 0;
      unsigned long long now = pad_now_ms();
      if (s_last_ms && now - s_last_ms < PAD_POLL_INTERVAL_MS) return;
@@ -2767,7 +2785,7 @@ index 621d53e2..e5764b25 100644
      s_last_ms = now;
      /* A real pad streams reports at roughly this rate whether or not anything
       * changed, and libpad buffers them; a fresh sweep is a fresh report for
-@@ -553,9 +1561,21 @@ static void pad_poll_backend(void)
+@@ -553,9 +1579,21 @@ static void pad_poll_backend(void)
  #ifdef _WIN32
      if (!s_host_state[0].connected) pad_poll_keyboard();
  #endif
@@ -2792,7 +2810,7 @@ index 621d53e2..e5764b25 100644
  }
  
  /* ---------------------------------------------------------------------------
-@@ -581,10 +1601,19 @@ s32 cellPadInit(u32 max_connect)
+@@ -581,10 +1619,19 @@ s32 cellPadInit(u32 max_connect)
      memset(s_port_setting, 0, sizeof(s_port_setting));
      memset(s_host_state, 0, sizeof(s_host_state));
  
@@ -2812,7 +2830,7 @@ index 621d53e2..e5764b25 100644
  
      return CELL_OK;
  }
-@@ -596,7 +1625,9 @@ s32 cellPadEnd(void)
+@@ -596,7 +1643,9 @@ s32 cellPadEnd(void)
      if (!s_pad_initialized)
          return CELL_PAD_ERROR_NOT_OPENED;
  
@@ -2822,7 +2840,7 @@ index 621d53e2..e5764b25 100644
  
      s_pad_initialized = 0;
      s_max_connect = 0;
-@@ -730,21 +1761,40 @@ skip_inject: ;
+@@ -730,21 +1779,40 @@ skip_inject: ;
       * field before CROSS means anything. Masks are CELL_PAD_CTRL_* packed as
       * (DIGITAL2 << 8) | DIGITAL1: START 0x0008, UP 0x0010, DOWN 0x0040,
       * LEFT 0x0080, RIGHT 0x0020, CROSS 0x4000, CIRCLE 0x2000, TRIANGLE 0x1000.
@@ -2866,7 +2884,7 @@ index 621d53e2..e5764b25 100644
                    while (*p == ',' || *p == ' ') p++;
                }
                printf("[cellPad] PAD_SCRIPT: %d event(s)\n", n_ev);
-@@ -752,24 +1802,47 @@ skip_inject: ;
+@@ -752,24 +1820,47 @@ skip_inject: ;
        }
        if (s_sc && port_no == 0) {
            double now = (double)(GetTickCount64() - t0) / 1000.0;
@@ -2919,7 +2937,7 @@ index 621d53e2..e5764b25 100644
        } }
  
      /* PAD_FILE=<path> -- closed-loop input. Each poll, if the file holds a
-@@ -817,20 +1890,32 @@ skip_inject: ;
+@@ -817,20 +1908,32 @@ skip_inject: ;
       * started -- which can leave the subject of the demo off-screen or too far
       * away to make out. Legit input simulation, same footing as YDKJ_INJECT_PAD. */
      { static int s_st = -1;
@@ -2962,7 +2980,7 @@ index 621d53e2..e5764b25 100644
        /* PAD_SWEEP=<seconds per step>: walk the sticks through a fixed set of
         * deflections instead of holding one. Guessing a single stick position and
         * re-running costs ~5 minutes a try; a sweep answers "can input move the
-@@ -995,7 +2080,7 @@ s32 cellPadGetInfo(CellPadInfo2* info)
+@@ -995,7 +2098,7 @@ s32 cellPadGetInfo(CellPadInfo2* info)
                    (s_host_state[i].connected || i == 0));
          vm_write16(gaddr + 0x00C + i * 2, on ? 0x054C : 0);   /* vendor: Sony  */
          vm_write16(gaddr + 0x10A + i * 2, on ? 0x0268 : 0);   /* product: DS3  */
@@ -2971,7 +2989,7 @@ index 621d53e2..e5764b25 100644
      }
      return CELL_OK;
  }
-@@ -1022,7 +2107,7 @@ s32 cellPadGetInfo2(CellPadInfo2* info_guest)
+@@ -1022,7 +2125,7 @@ s32 cellPadGetInfo2(CellPadInfo2* info_guest)
           * boot flows that block until a controller is connected can proceed even
           * with no physical device attached. */
          if (s_host_state[i].connected || i == 0) {
@@ -2980,7 +2998,7 @@ index 621d53e2..e5764b25 100644
              info->port_setting[i]      = s_port_setting[i];
              info->device_capability[i] = CELL_PAD_CAPABILITY_PS3_CONFORMITY
                                         | CELL_PAD_CAPABILITY_PRESS_MODE
-@@ -1032,7 +2117,7 @@ s32 cellPadGetInfo2(CellPadInfo2* info_guest)
+@@ -1032,7 +2135,7 @@ s32 cellPadGetInfo2(CellPadInfo2* info_guest)
              info->device_type[i]       = CELL_PAD_DEV_TYPE_STANDARD;
              connected++;
          } else {
@@ -2989,7 +3007,7 @@ index 621d53e2..e5764b25 100644
          }
      }
      info->now_connect = connected;
-@@ -1077,7 +2162,7 @@ s32 cellPadPeriphGetInfo(CellPadPeriphInfo* info_guest)
+@@ -1077,7 +2180,7 @@ s32 cellPadPeriphGetInfo(CellPadPeriphInfo* info_guest)
          /* Same virtual-pad-on-port-0 rule as cellPadGetInfo2, so both views of
           * the ports agree (a game that cross-checks them must see one truth). */
          if ((i < PAD_MAX_HOST_PORTS && s_host_state[i].connected) || i == 0) {
@@ -2998,7 +3016,7 @@ index 621d53e2..e5764b25 100644
              info->port_setting[i]      = s_port_setting[i];
              info->device_capability[i] = CELL_PAD_CAPABILITY_PS3_CONFORMITY
                                         | CELL_PAD_CAPABILITY_PRESS_MODE
-@@ -1089,7 +2174,7 @@ s32 cellPadPeriphGetInfo(CellPadPeriphInfo* info_guest)
+@@ -1089,7 +2192,7 @@ s32 cellPadPeriphGetInfo(CellPadPeriphInfo* info_guest)
              info->pclass_profile[i]    = 0;
              connected++;
          } else {
@@ -3007,7 +3025,7 @@ index 621d53e2..e5764b25 100644
          }
      }
      info->now_connect = connected;
-@@ -1099,7 +2184,7 @@ s32 cellPadPeriphGetInfo(CellPadPeriphInfo* info_guest)
+@@ -1099,7 +2202,7 @@ s32 cellPadPeriphGetInfo(CellPadPeriphInfo* info_guest)
            vm_write32((unsigned long long)ea + _o, *(u32*)((char*)info + _o)); }
  
      { static int _n = 0;
@@ -3016,7 +3034,7 @@ index 621d53e2..e5764b25 100644
            printf("[cellPad] PeriphGetInfo(max=%u now=%u) -> STANDARD class\n",
                   info->max_connect, connected); }
      return CELL_OK;
-@@ -1175,6 +2260,24 @@ s32 cellPadGetCapabilityInfo(u32 port_no, CellPadCapabilityInfo* info)
+@@ -1175,6 +2278,24 @@ s32 cellPadGetCapabilityInfo(u32 port_no, CellPadCapabilityInfo* info)
      return CELL_OK;
  }
  
@@ -3041,7 +3059,7 @@ index 621d53e2..e5764b25 100644
  s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
  {
      if (!s_pad_initialized)
-@@ -1185,28 +2288,50 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
+@@ -1185,28 +2306,50 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
  
      param = GUEST_PTR(param, CellPadActParam*);
  
@@ -3113,10 +3131,10 @@ index 621d53e2..e5764b25 100644
  
  s32 cellPadClearBuf(u32 port_no)
 diff --git a/libs/input/cellPad.h b/libs/input/cellPad.h
-index 89c58ab6..c5ff5cd1 100644
+index 89c58ab6..38f1b946 100644
 --- a/libs/input/cellPad.h
 +++ b/libs/input/cellPad.h
-@@ -194,6 +194,14 @@ s32 cellPadGetCapabilityInfo(u32 port_no, CellPadCapabilityInfo* info);
+@@ -194,6 +194,20 @@ s32 cellPadGetCapabilityInfo(u32 port_no, CellPadCapabilityInfo* info);
  /* NID: 0xBE5C3E81 */
  s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param);
  
@@ -3127,6 +3145,12 @@ index 89c58ab6..c5ff5cd1 100644
 + * 300 ms after the last one; 0, 0 ends it. PS3_RUMBLE=0 silences it and
 + * PS3_RUMBLE_STRENGTH scales it, as they do the title's rumble. */
 +void cellPad_host_pulse(int port, unsigned lo, unsigned hi);
++
++/* Host side: the DualSense / DualShock 4 light bar's colour, 0xRRGGBB, in
++ * place of PS3_PAD_LIGHT's (a port's game state, e.g. inFAMOUS's karma);
++ * -1 gives PS3_PAD_LIGHT's back. Only over a configured colour: an unset
++ * PS3_PAD_LIGHT and "off" stay. PS3_PAD_LIGHT_HIT's red glow goes on top. */
++void cellPad_host_set_light(int rgb);
 +
  /* NID: 0x3733EA3C */
  s32 cellPadClearBuf(u32 port_no);
@@ -3826,10 +3850,10 @@ index 00000000..fb89f165
 +#endif /* PS3RECOMP_PAD_INPUT_MAP_H */
 diff --git a/libs/input/tests/test_pad_adaptive.c b/libs/input/tests/test_pad_adaptive.c
 new file mode 100644
-index 00000000..41ef069f
+index 00000000..05c429ba
 --- /dev/null
 +++ b/libs/input/tests/test_pad_adaptive.c
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,282 @@
 +/* cellPad's DualSense adaptive triggers: a DualSense gets a gun click on the
 + * firing trigger (pressed only past the break) and a light resistance on the
 + * other; firing with the motors running makes the firing trigger buzz, and
@@ -4005,6 +4029,24 @@ index 00000000..41ef069f
 +    poll_wait(60);
 +    assert(s_x.rgb[0] > 0x80 && s_x.rgb[1] < 0x20 && s_x.rgb[2] < 0x30);
 +    rumble(0);
++    poll_wait(60);
++    assert(s_x.rgb[0] == 0x10 && s_x.rgb[1] == 0x20 && s_x.rgb[2] == 0x30);
++
++    /* A port's own colour (inFAMOUS's karma) replaces PS3_PAD_LIGHT's, the
++     * motors still pull it towards red, and -1 gives the configured one back. */
++    cellPad_host_set_light(0xFF5A1E);
++    poll_wait(60);
++    assert(s_x.rgb[0] == 0xFF && s_x.rgb[1] == 0x5A && s_x.rgb[2] == 0x1E);
++    cellPad_host_set_light(0x2A8CFF);
++    poll_wait(60);
++    assert(s_x.rgb[0] == 0x2A && s_x.rgb[1] == 0x8C && s_x.rgb[2] == 0xFF);
++    rumble(255);
++    poll_wait(60);
++    assert(s_x.rgb[0] > 0x80 && s_x.rgb[1] < 0x20 && s_x.rgb[2] < 0x30);
++    rumble(0);
++    poll_wait(60);
++    assert(s_x.rgb[0] == 0x2A && s_x.rgb[1] == 0x8C && s_x.rgb[2] == 0xFF);
++    cellPad_host_set_light(-1);
 +    poll_wait(60);
 +    assert(s_x.rgb[0] == 0x10 && s_x.rgb[1] == 0x20 && s_x.rgb[2] == 0x30);
 +

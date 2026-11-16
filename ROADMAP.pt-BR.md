@@ -79,7 +79,7 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 - [ ] Senti-los num DualSense, com a Steam fechada (o Steam Input reescreve a saída do controle: era por isso que nada chegava a ele também nos ports do Resistance).
 - [x] Batimento com pouca vida (2026-11-13): a vida do Cole achada (`[0x8F7580] +0x750/+0x754`, `infamous1-lle/notes/health/`), o batimento do port do inFAMOUS 2 e o `cellPad_host_pulse` do toolkit; conferido escrevendo a vida dele no tutorial (liga em 30%, mais rápido em 5%, desliga em 100%, a imagem do próprio jogo cinza e de volta).
 - [ ] O batimento com um golpe de verdade e com uma morte e o renascimento (o ponteiro acompanha o herói novo?), e mudo em cenas que mantêm o relógio do mundo andando.
-- [ ] A barra de luz seguindo o karma do Cole (azul/vermelho) pela memória do jogo (não achado junto da vida).
+- [x] A barra de luz seguindo o karma do Cole (azul/vermelho) pela memória do jogo: f32 em `0x7D6128` (a imagem do save no objeto de progresso `0x7D6110`), níveis pela tabela do próprio jogo (`infamous1-lle/notes/karma/README.md`). Lido no jogo com o save do Erik (50.0, Guardian) e o do tutorial (0, neutro); falta ver num DualSense com uma mudança de karma.
 - [ ] O menu no jogo (F1 / Cmd+, / L3+R3) neste jogo.
 
 ### Rebuild

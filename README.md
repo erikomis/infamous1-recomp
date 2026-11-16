@@ -220,6 +220,14 @@ turns it off, `PS3_HEARTBEAT_AT=<5-90>` moves the threshold). The game's own
 picture goes black and white at about the same point. How Cole's health was
 found: [`infamous1-lle/notes/health/`](infamous1-lle/notes/health/README.md).
 
+**Light bar in Cole's karma** (DualSense, DualShock 4): with the game's colour
+the light bar follows Cole's karma rank, read from the game's memory: electric
+blue when neutral, lighter blues for Guardian, Champion and Hero, orange to
+pure red for Thug, Outlaw and Infamous, shading over half a second when the
+rank changes; the red glow with hits stays on top. A colour picked in the
+launcher keeps its colour (`PS3_KARMA_LIGHT=0` turns it off). How the karma
+was found: [`infamous1-lle/notes/karma/`](infamous1-lle/notes/karma/README.md).
+
 
 | Key | PS3 |
 | --- | --- |

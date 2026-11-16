@@ -142,8 +142,9 @@ pub struct Settings {
     /// PS3_HEARTBEAT=0 when off: the controller beats like a heart while
     /// Cole is badly hurt (the port's heartbeat.c). On by default.
     pub heartbeat: bool,
-    /// PS3_PAD_LIGHT: the DualSense / DualShock 4 light bar, "" (the game's
-    /// electric blue, main.cpp), "off", or RRGGBB.
+    /// PS3_PAD_LIGHT: the DualSense / DualShock 4 light bar, "" (the game's:
+    /// Cole's karma, karma_light.c, from main.cpp's electric blue), "off",
+    /// or RRGGBB (a fixed colour; the karma no longer changes it).
     pub pad_light: String,
     /// PS3_PAD_LIGHT_HIT=0 when off: the light bar glows red with the
     /// game's rumble (hits, explosions).
