@@ -54,7 +54,7 @@ a seguir. `[x]` = feito e verificado; `[ ]` = a fazer. Evidências e logs estão
 - [x] Corte de malhas desligado em resoluções escaladas (2026-11-15): o "Disable Mesh Trimming" do RPCS3 escreve `bi $0` sobre a primeira instrução de uma função do Edge geometry (job `jobmod_2e6aac472eee_ec2c0`, LS `0x8520`), código recompilado que um patch na RAM não alcança; o `--insn-guard ADDR=SÍMBOLO:ret` do lifter retorna ali em tempo de execução (`mesh_trim.c`, `PS3_MESH_TRIM`, como no port do inFAMOUS 2). Conferido: o jogo passa pelo guard, os dois modos renderizam, nada some; buracos com o corte ligado não apareceram no close-up da intro em 2x comparado, então o ganho aqui ainda não foi mostrado.
 - [ ] O pop-in de fato (troca de LOD, distância de streaming): as constantes de distância ainda não foram achadas.
 - [x] Supersampling (2026-11-13): uma resolução interna acima dos pixels da janela é reduzida para a janela com um filtro Lanczos (MetalPerformanceShaders, `PS3_DOWNSCALE=0` desliga) em vez de a camada amostrá-la; `tools/test_metal_downscale.py` (um xadrez de 1 pixel reduzido 3x sai num cinza uniforme). Ainda não comparado a olho numa janela.
-- [ ] Capturas A/B das alavancas de imagem (FXAA/SMAA, `PS3_RES_SCALE`, MetalFX, nitidez) na mesma cena, com o `tools/capture.sh`.
+- [~] Capturas A/B das alavancas de imagem na mesma cena, com o `tools/capture.sh`: 720p nativo contra o perfil Qualidade (3x interno, SMAA+FXAA, anisotrópico 16x), a grade do terraço na saída em 720p (`infamous1-lle/notes/aa/`): os fios passam de grossos e em degraus para finos e contínuos. Falta: em movimento (cintilação), MetalFX, nitidez.
 - [ ] Verificar a renderização em cenas mais adiante (iluminação, sombras, água, partículas) em janela; as correções do inFAMOUS 2 foram achadas assim.
 
 ### Estabilidade
@@ -135,7 +135,7 @@ Levantados pelo Erik (2026-11-10), com o plano técnico de cada item. Os problem
 | Problema | O que acontecia no original | Plano no port | Estado |
 |---|---|---|---|
 | Quedas de FPS | Oscilações durante explosões, combates e áreas movimentadas | 1) O recomp já roda ~44 fps (o console mirava 30). 2) Job de luz/SSAO movido para a GPU (acima). 3) O cache de shaders evita engasgos de tradução | 🟡 parcial (2 e 3 pendentes) |
-| Aliasing | Bordas serrilhadas em prédios, fios e objetos | `PS3_AA=fxaa/smaa` + `PS3_UPSCALE=metalfx` + `PS3_RES_SCALE=2` (1440p), já no launcher; validar o A/B visual | 🟡 disponível, validação pendente |
+| Aliasing | Bordas serrilhadas em prédios, fios e objetos | `PS3_AA=fxaa/smaa` + `PS3_UPSCALE=metalfx` + `PS3_RES_SCALE=2` (1440p), já no launcher; A/B estático na grade do terraço feito (`infamous1-lle/notes/aa/`), falta em movimento | 🟢 disponível, A/B em quadro parado validado |
 | Escalada | O Cole agarrava objetos indesejados ou não alcançava o ponto certo | Patch de lógica no lift: mapear raycast/agarramento (`game_patches.cpp`); pode precisar de ajuste por constante | ⚪ não iniciado (pesado) |
 | Pop-in | Objetos e detalhes surgiam conforme o jogador se aproximava | O streaming já roda de SSD local (mais rápido que o PS3). A distância de desenho é constante do jogo: mudar exige achar as constantes de LOD/streaming no EBOOT | 🟡 parcial (streaming ok, LOD não) |
 

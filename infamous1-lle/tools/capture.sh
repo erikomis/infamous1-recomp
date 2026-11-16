@@ -1,5 +1,7 @@
 #!/bin/sh
 # Headless run that keeps a frame every 10 s: tools/capture.sh <name> [seconds]
+# (CAPTURE_EVERY=<s> another interval; PS3RECOMP_METAL_FRAME_DUMP_EVERY=<n>
+# makes the port dump every n frames instead of 120, for short intervals)
 # Writes out/<name>.log and out/<name>/t<sec>.png. Environment (PAD_SCRIPT,
 # diagnostics) passes through to the port.
 #
@@ -34,7 +36,7 @@ cd "$cwd" || exit 1
 PS3RECOMP_METAL_FRAME_DUMP="$dir/frame.ppm" "$here/tools/boot.sh" "$here/out/$name.log" "$secs" &
 bp=$!; start=$(date +%s)
 while kill -0 $bp 2>/dev/null; do
-    /bin/sleep 10
+    /bin/sleep "${CAPTURE_EVERY:-10}"
     t=$(( $(date +%s) - start ))
     [ -f "$dir/frame.ppm" ] && cp "$dir/frame.ppm" "$dir/t$(printf %03d $t).ppm" 2>/dev/null
 done

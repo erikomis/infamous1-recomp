@@ -54,7 +54,7 @@ comes next. `[x]` = done and verified; `[ ]` = to do. Evidence and logs are in
 - [x] Mesh trimming off at scaled resolutions (2026-11-15): RPCS3's "Disable Mesh Trimming" writes `bi $0` over the first instruction of an Edge geometry function (job `jobmod_2e6aac472eee_ec2c0`, LS `0x8520`), lifted code a RAM patch never reaches; the lifter's `--insn-guard ADDR=SYMBOL:ret` returns there at run time instead (`mesh_trim.c`, `PS3_MESH_TRIM`, as in the inFAMOUS 2 port). Checked: the game takes the guard, both modes render, nothing is lost; holes with trimming on were not seen in the 2x intro close-up compared, so the gain here is not shown yet.
 - [ ] Pop-in proper (LOD switches, streaming distance): the distance constants are not found yet.
 - [x] Supersampling (2026-11-13): an internal resolution above the window's pixels is reduced into the window with a Lanczos filter (MetalPerformanceShaders, `PS3_DOWNSCALE=0` off) instead of the layer sampling it; `tools/test_metal_downscale.py` (a 1-pixel checkerboard reduced 3x comes out an even grey). Not yet compared by eye in a window.
-- [ ] A/B captures of the image levers (FXAA/SMAA, `PS3_RES_SCALE`, MetalFX, sharpening) on the same scene, with `tools/capture.sh`.
+- [~] A/B captures of the image levers on the same scene, with `tools/capture.sh`: native 720p against the Quality profile (3x internal, SMAA+FXAA, anisotropic 16x), the rooftop's chain-link fence at 720p output (`infamous1-lle/notes/aa/`): the wires go from thick and stepped to thin and continuous. Still to do: in motion (shimmer), MetalFX, sharpening.
 - [ ] Check the rendering on later scenes (lighting, shadows, water, particles) in a window; the inFAMOUS 2 fixes were found that way.
 
 ### Stability
@@ -135,7 +135,7 @@ Raised by Erik (2026-11-10), with the technical plan for each item. Image and sp
 | Problem | What happened in the original | Plan in the port | State |
 |---|---|---|---|
 | FPS drops | Dips during explosions, fights and busy areas | 1) The recomp already runs ~44 fps (the console aimed at 30). 2) Move the lighting/SSAO job to the GPU (above). 3) The shader cache avoids translation hitches | 🟡 partial (2 and 3 pending) |
-| Aliasing | Jagged edges on buildings, wires and objects | `PS3_AA=fxaa/smaa` + `PS3_UPSCALE=metalfx` + `PS3_RES_SCALE=2` (1440p), already in the launcher; validate the visual A/B | 🟡 available, validation pending |
+| Aliasing | Jagged edges on buildings, wires and objects | `PS3_AA=fxaa/smaa` + `PS3_UPSCALE=metalfx` + `PS3_RES_SCALE=2` (1440p), already in the launcher; static A/B on the rooftop fence done (`infamous1-lle/notes/aa/`), in motion still to see | 🟢 available, still-frame A/B validated |
 | Climbing | Cole grabbed unwanted objects or missed the right point | A logic patch in the lift: map the raycast/grab (`game_patches.cpp`); may need tuning by constant | ⚪ not started (heavy) |
 | Pop-in | Objects and detail appeared as the player got close | Streaming already runs from a local SSD (faster than the PS3). Draw distance is a game constant: changing it means finding the LOD/streaming constants in the EBOOT | 🟡 partial (streaming ok, LOD not) |
 
