@@ -213,6 +213,7 @@ add_executable(${PROJECT_NAME}
     game_clock.c
     heartbeat.c
     karma_light.c
+    draw_distance.c
     mesh_trim.c
     game_patches.cpp
     ssao_gpu.c

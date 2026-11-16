@@ -71,6 +71,9 @@ pub struct Settings {
     pub gamma: f32,
     /// PS3_ANISO: anisotropic filtering, 0 (off), 2, 4, 8 or 16.
     pub aniso: u32,
+    /// PS3_DRAW_DISTANCE: how far objects are drawn, percent of the PS3's
+    /// (100, 150, 200 or 300; the port's draw_distance.c).
+    pub draw_distance: u32,
     /// PS3_AA: "" (off), "fxaa", "smaa" or "smaa-fxaa".
     pub aa: String,
     /// PS3_SHARPEN: contrast-adaptive sharpening, 0 (off) to 1.
@@ -192,6 +195,7 @@ impl Default for Settings {
             gamma_override: false,
             gamma: 1.0,
             aniso: 0,
+            draw_distance: 100,
             aa: String::new(),
             sharpen: 0.0,
             vibrance: 0.0,
@@ -720,6 +724,10 @@ fn launch_env(s: &Settings, inst: &InstallInfo, input: &InputEnv) -> Vec<(String
     // Graphics options: only what differs from the game's own output.
     if s.aniso > 1 {
         set("PS3_ANISO", s.aniso.min(16).to_string());
+    }
+    if s.draw_distance > 100 {
+        let f = s.draw_distance.min(400) as f32 / 100.0;
+        set("PS3_DRAW_DISTANCE", format!("{f}"));
     }
     if matches!(s.aa.as_str(), "fxaa" | "smaa" | "smaa-fxaa") {
         set("PS3_AA", s.aa.clone());
@@ -2989,9 +2997,16 @@ mod tests {
         let mut s = Settings::default();
         let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
         assert_eq!(env.get("PS3_VERBOSE").map(String::as_str), Some("0"), "normal play logs quietly");
-        for k in ["PS3_ANISO", "PS3_AA", "PS3_SHARPEN", "PS3_UPSCALE"] {
+        for k in ["PS3_ANISO", "PS3_AA", "PS3_SHARPEN", "PS3_UPSCALE", "PS3_DRAW_DISTANCE"] {
             assert!(!env.contains_key(k), "{k} is a default and must stay out");
         }
+        s.draw_distance = 150;
+        let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
+        assert_eq!(env.get("PS3_DRAW_DISTANCE").map(String::as_str), Some("1.5"));
+        s.draw_distance = 900;
+        let env: BTreeMap<_, _> = launch_env(&s, &inst, &none).into_iter().collect();
+        assert_eq!(env.get("PS3_DRAW_DISTANCE").map(String::as_str), Some("4"), "capped at 4x");
+        s.draw_distance = 100;
         s.aniso = 32;
         s.aa = "fxaa".into();
         s.sharpen = 0.5;

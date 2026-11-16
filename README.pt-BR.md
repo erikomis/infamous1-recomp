@@ -259,6 +259,7 @@ Variáveis úteis, compartilhadas com os outros ports deste toolkit:
 | `PS3_AA=fxaa` / `smaa` / `smaa-fxaa` | anti-aliasing: FXAA ou SMAA na resolução interna; `smaa-fxaa` soma o FXAA depois da escala (o perfil Qualidade do launcher, com 4K interno) |
 | `PS3_RES_SCALE=1.5\|2\|3` | resolução interna (1080p / 1440p / 4K): todos os alvos de cor e profundidade, sombras e reflexos incluídos. Acima dos pixels da janela vira supersampling: cada quadro é reduzido para a janela com um filtro Lanczos, contando todos os pixels (`PS3_DOWNSCALE=0`: a redução antiga) |
 | `PS3_SHADOW_FILTER=auto\|1\|0` | filtro da borda das sombras. O PS3 compara 2x2 texels do mapa de sombra, então com o sol baixo a borda da sombra faz um degrau por texel (a sombra do Cole no terraço do tutorial). `auto` (padrão): acima de 720p interno, um filtro 4x4 que faz cada borda descer em três texels; em 720p o 2x2 do próprio PS3. `1` / `0` forçam um ou outro |
+| `PS3_DRAW_DISTANCE=1.5\|2\|3` | distância de desenho: os objetos são desenhados tantas vezes mais longe que no PS3 (a tabela de oito classes de distância do jogo, de 400 a 12000, lida pelo job de SPU "visprog"; o "Distância de desenho" do launcher). Menos pop-in; custa um pouco de fps. Padrão 1 |
 | `PS3_UPSCALE=metalfx` | upscaling espacial MetalFX até a janela |
 | `PS3_MESH_TRIM=0\|1` | o corte de triângulos minúsculos do Edge geometry ("Disable Mesh Trimming" do RPCS3): desligado por padrão só acima da resolução interna 1x; `0` nunca corta, `1` sempre (como no PS3) |
 | `PS3_SHARPEN=<0..1>` | nitidez adaptativa ao contraste |

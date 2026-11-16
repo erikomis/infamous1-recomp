@@ -24,6 +24,7 @@ interface Settings {
   gammaOverride: boolean;
   gamma: number;
   aniso: number;
+  drawDistance: number;
   aa: string;
   sharpen: number;
   patches: string[];
@@ -557,6 +558,7 @@ function bindSettings() {
       gammaOverride: false,
       gamma: 1.0,
       aniso: 0,
+      drawDistance: 100,
       aa: "",
       sharpen: 0,
       vibrance: 0,
@@ -606,7 +608,7 @@ function bindSettings() {
 }
 
 /** A fixed list (window mode and size, anisotropic, AA, upscaling). */
-function bindSelect(id: string, key: "windowMode" | "windowSize" | "aniso" | "aa" | "upscale" | "resScale" | "aspect" | "buttonIcons" | "padLight" | "gyro") {
+function bindSelect(id: string, key: "windowMode" | "windowSize" | "aniso" | "drawDistance" | "aa" | "upscale" | "resScale" | "aspect" | "buttonIcons" | "padLight" | "gyro") {
   const el = $<HTMLSelectElement>(id);
   const sync = () => {
     el.value = String(settings[key]);
@@ -615,7 +617,7 @@ function bindSelect(id: string, key: "windowMode" | "windowSize" | "aniso" | "aa
   syncers.push(sync);
   sync();
   el.addEventListener("change", () => {
-    if (key === "aniso" || key === "gyro") settings[key] = Number(el.value);
+    if (key === "aniso" || key === "gyro" || key === "drawDistance") settings[key] = Number(el.value);
     else settings[key] = el.value;
     syncAll();
     persist();
@@ -626,6 +628,7 @@ function bindSelect(id: string, key: "windowMode" | "windowSize" | "aniso" | "aa
  * PS3_SHARPEN, PS3_UPSCALE); Play passes only what differs from the default. */
 function bindGraphics(bindRange: (id: string, key: keyof Settings, fmt: (v: number) => string) => void) {
   bindSelect("aniso", "aniso");
+  bindSelect("draw-distance", "drawDistance");
   bindSelect("aa", "aa");
   bindSelect("upscale", "upscale");
   bindSelect("q-upscale", "upscale");
