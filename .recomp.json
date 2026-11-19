@@ -1,0 +1,15 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "inFAMOUS",
+  "system": "PS3",
+  "type": "recomp",
+  "original": {
+    "serial": "NPUA80480"
+  },
+  "status": "released",
+  "targets": [
+    "macOS"
+  ],
+  "toolchain": "ps3recomp",
+  "notes": "Public alpha for Apple silicon Macs. Boots through the opening explosion into the prologue tutorial; the full campaign and long sessions have not been validated."
+}

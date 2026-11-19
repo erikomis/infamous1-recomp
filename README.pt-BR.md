@@ -43,6 +43,12 @@ firmware e as correções que fizeram o jogo rodar no Mac; o launcher e o runtim
 compartilhado vêm do [port do inFAMOUS 2](https://github.com/erikomis/infamous2-recomp).
 Veja [CREDITS.pt-BR.md](CREDITS.pt-BR.md).
 
+## Metadados do projeto
+
+Os metadados do projeto para catálogos e ferramentas ficam em [`.recomp.json`](.recomp.json),
+conforme a [especificação do recomp.board](https://recomp.fyi/spec). Mantenha o arquivo
+atualizado quando mudar o estado do projeto, a versão do jogo suportada ou as plataformas de destino.
+
 ## Estado
 
 | | |
